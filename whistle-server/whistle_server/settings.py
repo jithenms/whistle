@@ -39,7 +39,7 @@ INSTALLED_APPS = [
     "authn",
     "connector",
     "notification",
-    "user",
+    "account"
 ]
 
 MIDDLEWARE = [

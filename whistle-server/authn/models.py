@@ -1,7 +1,7 @@
 from django.db import models
 import uuid
 
-from user.models import User
+from account.models import Account
 
 
 class Credential(models.Model):
@@ -9,7 +9,7 @@ class Credential(models.Model):
         primary_key=True,
         default=uuid.uuid4,
         editable=False)
-    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    account = models.ForeignKey(Account, on_delete=models.CASCADE)
     api_key = models.CharField(max_length=255, unique=True)
     api_secret_hash = models.CharField(max_length=255, unique=True)
     api_secret_hint = models.CharField(max_length=255)

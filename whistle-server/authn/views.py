@@ -26,7 +26,7 @@ class CredentialViewSet(CreateAPIView, GenericViewSet):
 
         api_secret_hash = hashlib.sha256((api_secret + salt).encode()).hexdigest()
 
-        serializer.save(user=request._user, api_key=api_key, api_secret_hash=api_secret_hash,
+        serializer.save(account=request.account, api_key=api_key, api_secret_hash=api_secret_hash,
                         api_secret_hint=api_secret[:8], salt=salt)
 
         response = JsonResponse({**serializer.data, "api_secret": api_secret}, status=status.HTTP_201_CREATED,

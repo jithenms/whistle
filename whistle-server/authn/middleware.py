@@ -7,8 +7,8 @@ from jwt import PyJWKClient
 from rest_framework import status
 
 from authn.models import Credential
-from user.models import User
-from user.serializers import UserSerializer
+from account.models import Account
+from account.serializers import AccountSerializer
 
 auth_error_msg = {
     'error': 'access_denied',
@@ -18,14 +18,14 @@ auth_error_msg = {
 
 class AuthMiddleware:
     auth_endpoints = {
-        '/api/v1/users/': {'methods': ['GET']},
+        '/api/v1/accounts/': {'methods': ['GET']},
         '/api/v1/credentials/': {'methods': ['POST']},
     }
     auth0_domain = os.getenv("AUTH0_DOMAIN")
     auth0_audience = os.getenv("AUTH0_AUDIENCE")
     jwks_endpoint = f"{auth0_domain}/.well-known/jwks.json"
     jwks_client = PyJWKClient(jwks_endpoint)
-    user_serializer = UserSerializer
+    user_serializer = AccountSerializer
 
     def __init__(self, get_response):
         self.get_response = get_response
@@ -46,7 +46,7 @@ class AuthMiddleware:
                 except:
                     response = JsonResponse(auth_error_msg, status=status.HTTP_401_UNAUTHORIZED)
                     return response
-                request._user = User.objects.get(auth0_id=data['sub'])
+                request.account = Account.objects.get(auth0_id=data['sub'])
             else:
                 api_key = request.headers.get('X-API-Key')
                 api_secret = request.headers.get('X-API-Secret')
@@ -60,7 +60,7 @@ class AuthMiddleware:
                         response = JsonResponse(auth_error_msg, status=status.HTTP_401_UNAUTHORIZED)
                         return response
                     else:
-                        request._user = credential.user
+                        request.account = credential.account
 
         response = self.get_response(request)
 

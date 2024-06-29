@@ -6,7 +6,7 @@ from django.http import JsonResponse
 from jwt import PyJWKClient
 from rest_framework import status
 
-from authn.models import Application
+from authn.models import Credential
 from user.models import User
 from user.serializers import UserSerializer
 
@@ -19,7 +19,7 @@ auth_error_msg = {
 class AuthMiddleware:
     auth_endpoints = {
         '/api/v1/users/': {'methods': ['GET']},
-        '/api/v1/applications/': {'methods': ['POST']},
+        '/api/v1/credentials/': {'methods': ['POST']},
     }
     auth0_domain = os.getenv("AUTH0_DOMAIN")
     auth0_audience = os.getenv("AUTH0_AUDIENCE")
@@ -54,13 +54,13 @@ class AuthMiddleware:
                     response = JsonResponse(auth_error_msg, status=status.HTTP_401_UNAUTHORIZED)
                     return response
                 else:
-                    application = Application.objects.get(api_key=api_key)
-                    api_secret_hash = hashlib.sha256((api_secret + application.salt).encode()).hexdigest()
-                    if api_secret_hash != application.api_secret_hash:
+                    credential = Credential.objects.get(api_key=api_key)
+                    api_secret_hash = hashlib.sha256((api_secret + credential.salt).encode()).hexdigest()
+                    if api_secret_hash != credential.api_secret_hash:
                         response = JsonResponse(auth_error_msg, status=status.HTTP_401_UNAUTHORIZED)
                         return response
                     else:
-                        request._user = application.user
+                        request._user = credential.user
 
         response = self.get_response(request)
 

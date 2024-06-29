@@ -23,7 +23,7 @@ import authn.views
 
 router = routers.DefaultRouter()
 router.register(r'users', user.views.UserViewSet)
-router.register(r'applications', authn.views.ApplicationViewSet)
+router.register(r'credentials', authn.views.CredentialViewSet)
 
 
 urlpatterns = [

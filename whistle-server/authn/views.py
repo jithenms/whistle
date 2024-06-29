@@ -6,18 +6,18 @@ from rest_framework import status, renderers
 from rest_framework.generics import CreateAPIView
 from rest_framework.viewsets import GenericViewSet
 
-from authn.models import Application
-from authn.serializers import ApplicationSerializer
+from authn.models import Credential
+from authn.serializers import CredentialSerializer
 
 
-class ApplicationViewSet(CreateAPIView, GenericViewSet):
-    queryset = Application.objects.all()
-    serializer_class = ApplicationSerializer
+class CredentialViewSet(CreateAPIView, GenericViewSet):
+    queryset = Credential.objects.all()
+    serializer_class = CredentialSerializer
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         if not serializer.is_valid():
-            return JsonResponse({'error': 'failed_to_create_application', 'error_description': "Invalid input"},
+            return JsonResponse({'error': 'failed_to_create_credential', 'error_description': "Invalid input"},
                                 status=status.HTTP_400_BAD_REQUEST)
 
         api_key = secrets.token_urlsafe(32)

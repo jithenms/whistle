@@ -1,13 +1,17 @@
+import base64
+import hashlib
+import os
+
 from django.http import JsonResponse
-from rest_framework import status, mixins, viewsets
-from rest_framework.generics import RetrieveAPIView, UpdateAPIView, DestroyAPIView
-from rest_framework.mixins import CreateModelMixin
-from rest_framework.response import Response
-from rest_framework.viewsets import GenericViewSet
+from keycove import generate_token, encrypt, decrypt
+from rest_framework import mixins, viewsets, status
+from rest_framework.generics import CreateAPIView, RetrieveAPIView
 
 from account.models import Account
 from account.serializers import AccountSerializer
 from authn.authentication import ServerAuthentication
+
+api_secret_key = os.getenv('API_SECRET_KEY')
 
 
 class AccountModelViewSet(viewsets.GenericViewSet):
@@ -15,7 +19,7 @@ class AccountModelViewSet(viewsets.GenericViewSet):
         return self.request.user
 
 
-class AccountViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, mixins.UpdateModelMixin,
+class AccountViewSet(CreateAPIView, RetrieveAPIView, mixins.UpdateModelMixin,
                      mixins.DestroyModelMixin,
                      AccountModelViewSet
                      ):
@@ -27,3 +31,32 @@ class AccountViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, mixins.
         if self.request.method == 'POST':
             return []
         return super(AccountViewSet, self).get_authenticators()
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        api_key = generate_token(16)
+        api_secret = generate_token(32)
+        api_secret_salt = generate_token(8)
+
+        api_key_encrypt = encrypt(api_key, api_secret_key)
+        api_secret_encrypt = encrypt(api_secret, api_secret_key)
+
+        api_key_hash = hashlib.sha256(api_key.encode()).hexdigest()
+
+        api_secret_hash = hashlib.sha256((api_secret + api_secret_salt).encode()).hexdigest()
+
+        serializer.save(api_key_encrypt=api_key_encrypt, api_key_hash=api_key_hash,
+                        api_secret_encrypt=api_secret_encrypt, api_secret_hash=api_secret_hash,
+                        api_secret_salt=api_secret_salt)
+        response = JsonResponse({**serializer.data, 'api_key': api_key, 'api_secret': api_secret},
+                                status=status.HTTP_201_CREATED)
+        return response
+
+    def retrieve(self, request, *args, **kwargs):
+        instance = self.get_object()
+        api_key = decrypt(instance.api_key_encrypt, api_secret_key)
+        api_secret = decrypt(instance.api_secret_encrypt, api_secret_key)
+        serializer = self.get_serializer(instance)
+        return JsonResponse({**serializer.data, 'api_key': api_key, 'api_secret': api_secret})

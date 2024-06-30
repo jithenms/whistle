@@ -10,14 +10,14 @@ from account.serializers import AccountSerializer
 from authn.authentication import ServerAuthentication
 
 
-class AccountMixin(viewsets.GenericViewSet):
+class AccountModelViewSet(viewsets.GenericViewSet):
     def get_object(self):
         return self.request.user
 
 
 class AccountViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, mixins.UpdateModelMixin,
                      mixins.DestroyModelMixin,
-                     AccountMixin
+                     AccountModelViewSet
                      ):
     queryset = Account.objects.all()
     serializer_class = AccountSerializer

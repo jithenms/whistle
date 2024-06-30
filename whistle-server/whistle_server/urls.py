@@ -20,12 +20,15 @@ from rest_framework.routers import DefaultRouter
 
 from account.views import AccountViewSet
 from authn.views import CredentialViewSet
+from connector.views import SendgridViewSet, TwilioViewSet
 from user.views import UserViewSet
 
 router = DefaultRouter()
 router.register(r'accounts', AccountViewSet, basename='account')
 router.register(r'credentials', CredentialViewSet, basename='credential')
 router.register(r'users', UserViewSet, basename='user')
+router.register(r'connectors/twilio', TwilioViewSet, basename='twilio')
+router.register(r'connectors/sendgrid', SendgridViewSet, basename='sendgrid')
 
 urlpatterns = [
     path('admin/', admin.site.urls),

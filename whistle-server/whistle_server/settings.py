@@ -39,7 +39,8 @@ INSTALLED_APPS = [
     "authn",
     "connector",
     "notification",
-    "account"
+    "account",
+    "user"
 ]
 
 MIDDLEWARE = [
@@ -50,13 +51,15 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    "authn.middleware.AuthMiddleware",
-
 ]
 
 REST_FRAMEWORK = {
     'DEFAULT_RENDERER_CLASSES': (
         'rest_framework.renderers.JSONRenderer',
+    ),
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+        'authn.authentication.ServerAuthentication',
+        'authn.authentication.ClientAuthentication',
     )
 }
 

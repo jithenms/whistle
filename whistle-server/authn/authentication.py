@@ -30,9 +30,9 @@ class ServerAuthentication(BaseAuthentication):
                 print(error)
                 raise exceptions.AuthenticationFailed()
 
-            org = upsert_org(data)
+            org = get_or_create_org(data)
 
-            upsert_user(data, org)
+            get_or_create_user(data, org)
 
             return org, None
         else:
@@ -68,9 +68,9 @@ class ClientAuthentication(BaseAuthentication):
             except:
                 raise exceptions.AuthenticationFailed()
 
-            org = upsert_org(data)
+            org = get_or_create_org(data)
 
-            upsert_user(data, org)
+            get_or_create_user(data, org)
 
             return org, None
         else:
@@ -96,7 +96,7 @@ class IsValidExternalId(BasePermission):
             return False
 
 
-def upsert_user(data, org):
+def get_or_create_user(data, org):
     authn.User.objects.get_or_create(clerk_user_id=data['user_id'], organization=org,
                                      defaults={
                                          "full_name": data['full_name'],
@@ -104,7 +104,7 @@ def upsert_user(data, org):
                                      })
 
 
-def upsert_org(data):
+def get_or_create_org(data):
     org, org_created = authn.Organization.objects.get_or_create(clerk_org_id=data['org_id'], defaults={
         "slug": data['org_slug'], "name": data['org_name']
     })

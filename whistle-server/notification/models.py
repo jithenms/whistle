@@ -1,7 +1,7 @@
 import uuid
 from django.db import models
 
-from account.models import Account
+from authn.models import Organization
 from user.models import User
 
 status = (
@@ -15,7 +15,7 @@ class Notification(models.Model):
         primary_key=True,
         default=uuid.uuid4,
         editable=False)
-    account = models.ForeignKey(Account, on_delete=models.PROTECT)
+    organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
     recipient = models.ForeignKey(User, on_delete=models.PROTECT)
     category = models.SlugField(null=True, blank=True)
     topic = models.CharField(max_length=255, null=True, blank=True)

@@ -4,12 +4,12 @@ import hmac
 import jwt
 from django.conf import settings
 from jwt import PyJWKClient
-from keycove import decrypt
+from keycove import decrypt, generate_token, encrypt
 from rest_framework import exceptions
 from rest_framework.authentication import BaseAuthentication
 from rest_framework.permissions import BasePermission
 
-from account.models import Account
+import authn.models as authn
 
 jwks_client = PyJWKClient(settings.JWKS_ENDPOINT)
 
@@ -25,14 +25,16 @@ class ServerAuthentication(BaseAuthentication):
                     access_token,
                     signing_key.key,
                     algorithms=["RS256"],
-                    audience=settings.AUTH0_AUDIENCE,
                 )
-            except:
+            except jwt.PyJWTError as error:
+                print(error)
                 raise exceptions.AuthenticationFailed()
-            try:
-                return Account.objects.get(auth0_id=data['sub']), None
-            except Account.DoesNotExist:
-                raise exceptions.AuthenticationFailed()
+
+            org = upsert_org(data)
+
+            upsert_user(data, org)
+
+            return org, None
         else:
             api_key = request.headers.get('X-API-Key')
             api_secret = request.headers.get('X-API-Secret')
@@ -41,14 +43,14 @@ class ServerAuthentication(BaseAuthentication):
             else:
                 api_key_hash = hashlib.sha256(api_key.encode()).hexdigest()
                 try:
-                    account = Account.objects.get(api_key_hash=api_key_hash)
-                except Account.DoesNotExist:
+                    org = authn.Organization.objects.get(api_key_hash=api_key_hash)
+                except authn.Organization.DoesNotExist:
                     raise exceptions.AuthenticationFailed()
-                api_secret_hash = hashlib.sha256((api_secret + account.api_secret_salt).encode()).hexdigest()
-                if api_secret_hash != account.api_secret_hash:
+                api_secret_hash = hashlib.sha256((api_secret + org.api_secret_salt).encode()).hexdigest()
+                if api_secret_hash != org.api_secret_hash:
                     raise exceptions.AuthenticationFailed()
                 else:
-                    return account, None
+                    return org, None
 
 
 class ClientAuthentication(BaseAuthentication):
@@ -62,15 +64,22 @@ class ClientAuthentication(BaseAuthentication):
                     access_token,
                     signing_key.key,
                     algorithms=["RS256"],
-                    audience=settings.AUTH0_AUDIENCE,
                 )
             except:
                 raise exceptions.AuthenticationFailed()
-            return Account.objects.get(auth0_id=data['sub']), None
+
+            org = upsert_org(data)
+
+            upsert_user(data, org)
+
+            return org, None
         else:
             api_key = request.headers.get('X-API-Key')
             api_key_hash = hashlib.sha256(api_key.encode()).hexdigest()
-            return Account.objects.get(api_key_hash=api_key_hash), None
+            try:
+                return authn.Organization.objects.get(api_key_hash=api_key_hash), None
+            except:
+                raise exceptions.AuthenticationFailed()
 
 
 class IsValidExternalId(BasePermission):
@@ -85,3 +94,38 @@ class IsValidExternalId(BasePermission):
             return external_id_check == external_id_hmac
         else:
             return False
+
+
+def upsert_user(data, org):
+    authn.User.objects.get_or_create(clerk_user_id=data['user_id'], organization=org,
+                                     defaults={
+                                         "full_name": data['full_name'],
+                                         "primary_email": data['primary_email']
+                                     })
+
+
+def upsert_org(data):
+    org, org_created = authn.Organization.objects.get_or_create(clerk_org_id=data['org_id'], defaults={
+        "slug": data['org_slug'], "name": data['org_name']
+    })
+    if org_created:
+        api_key_encrypt, api_key_hash, api_secret_encrypt, api_secret_hash, api_secret_salt = generate_api_credentials()
+
+        org.api_key_encrypt = api_key_encrypt
+        org.api_key_hash = api_key_hash
+        org.api_secret_encrypt = api_secret_encrypt
+        org.api_secret_hash = api_secret_hash
+        org.api_secret_salt = api_secret_salt
+        org.save()
+    return org
+
+
+def generate_api_credentials():
+    api_key = generate_token(16)
+    api_secret = generate_token(32)
+    api_secret_salt = generate_token(8)
+    api_key_encrypt = encrypt(api_key, settings.WHISTLE_SECRET_KEY)
+    api_secret_encrypt = encrypt(api_secret, settings.WHISTLE_SECRET_KEY)
+    api_key_hash = hashlib.sha256(api_key.encode()).hexdigest()
+    api_secret_hash = hashlib.sha256((api_secret + api_secret_salt).encode()).hexdigest()
+    return api_key_encrypt, api_key_hash, api_secret_encrypt, api_secret_hash, api_secret_salt

@@ -9,7 +9,7 @@ class TwilioSerializer(serializers.ModelSerializer):
         fields = ['id', 'from_phone', 'account_sid', 'auth_token']
 
     def create(self, validated_data):
-        validated_data['account'] = self.context['request'].user
+        validated_data['organization'] = self.context['request'].user
         return super().create(validated_data)
 
 
@@ -19,5 +19,5 @@ class SendgridSerializer(serializers.ModelSerializer):
         fields = ['id', 'from_email', 'api_key']
 
     def create(self, validated_data):
-        validated_data['account'] = self.context['request'].user
+        validated_data['organization'] = self.context['request'].user
         return super().create(validated_data)

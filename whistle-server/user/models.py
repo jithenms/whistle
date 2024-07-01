@@ -1,7 +1,7 @@
 import uuid
 from django.db import models
 
-from account.models import Account
+from authn.models import Organization
 
 
 class User(models.Model):
@@ -9,7 +9,7 @@ class User(models.Model):
         primary_key=True,
         default=uuid.uuid4,
         editable=False)
-    account = models.ForeignKey(Account, on_delete=models.CASCADE)
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE)
     external_id = models.CharField(max_length=255)
     first_name = models.CharField(max_length=255, null=True, blank=True)
     last_name = models.CharField(max_length=255, null=True, blank=True)

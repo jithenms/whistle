@@ -44,7 +44,6 @@ INSTALLED_APPS = [
     "authn",
     "connector",
     "notification",
-    "account",
     "user"
 ]
 
@@ -143,7 +142,5 @@ CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_TASK_TRACK_STARTED = True
 
-AUTH0_DOMAIN = os.getenv('AUTH0_DOMAIN', "https://jshri.us.auth0.com")
-AUTH0_AUDIENCE = os.getenv('AUTH0_AUDIENCE', "https://jshri.us.auth0.com/api/v2/")
 WHISTLE_SECRET_KEY = os.getenv('WHISTLE_SECRET_KEY')
-JWKS_ENDPOINT = f"{AUTH0_DOMAIN}/.well-known/jwks.json"
+JWKS_ENDPOINT = os.getenv('JWKS_ENDPOINT')

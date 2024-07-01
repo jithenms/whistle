@@ -6,7 +6,7 @@ from connector.models import Twilio, Sendgrid
 class TwilioSerializer(serializers.ModelSerializer):
     class Meta:
         model = Twilio
-        fields = ['id', 'account_sid', 'auth_token']
+        fields = ['id', 'from_phone', 'account_sid', 'auth_token']
 
     def create(self, validated_data):
         validated_data['account'] = self.context['request'].user
@@ -16,7 +16,7 @@ class TwilioSerializer(serializers.ModelSerializer):
 class SendgridSerializer(serializers.ModelSerializer):
     class Meta:
         model = Sendgrid
-        fields = ['id', 'api_key']
+        fields = ['id', 'from_email', 'api_key']
 
     def create(self, validated_data):
         validated_data['account'] = self.context['request'].user

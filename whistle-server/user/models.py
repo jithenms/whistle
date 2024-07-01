@@ -11,12 +11,10 @@ class User(models.Model):
         editable=False)
     account = models.ForeignKey(Account, on_delete=models.CASCADE)
     external_id = models.CharField(max_length=255)
-    first_name = models.CharField(max_length=255)
-    last_name = models.CharField(max_length=255)
+    first_name = models.CharField(max_length=255, null=True, blank=True)
+    last_name = models.CharField(max_length=255, null=True, blank=True)
     email = models.CharField(max_length=255)
-    phone = models.CharField(max_length=255)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+    phone = models.CharField(max_length=255, null=True, blank=True)
 
 
 class UserPreference(models.Model):
@@ -28,13 +26,20 @@ class UserPreference(models.Model):
     slug = models.SlugField()
 
 
+CHANNELS = (
+    ('web', 'web'),
+    ('email', 'email'),
+    ('sms', 'sms')
+)
+
+
 class UserPreferenceChannel(models.Model):
     id = models.UUIDField(
         primary_key=True,
         default=uuid.uuid4,
         editable=False)
     user_preference = models.ForeignKey(UserPreference, related_name='channels', on_delete=models.CASCADE)
-    slug = models.SlugField()
+    slug = models.SlugField(choices=CHANNELS)
     enabled = models.BooleanField(default=False)
 
 
@@ -54,5 +59,5 @@ class UserSubscriptionCategory(models.Model):
         editable=False)
     user_subscription = models.ForeignKey(UserSubscription, related_name='categories', on_delete=models.CASCADE)
     slug = models.SlugField()
-    description = models.CharField(max_length=255)
+    description = models.CharField(max_length=255, null=True, blank=True)
     enabled = models.BooleanField(default=True)

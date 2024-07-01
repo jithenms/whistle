@@ -20,6 +20,7 @@ from rest_framework.routers import DefaultRouter
 
 from account.views import AccountViewSet
 from connector.views import SendgridViewSet, TwilioViewSet
+from notification.views import NotificationViewSet
 from user.views import UserViewSet, UserPreferenceViewSet, UserSubscriptionViewSet
 
 router = DefaultRouter()
@@ -27,6 +28,7 @@ router.register(r'accounts', AccountViewSet, basename='account')
 router.register(r'users', UserViewSet, basename='user')
 router.register(r'preferences', UserPreferenceViewSet, basename='preference')
 router.register(r'subscriptions', UserSubscriptionViewSet, basename='subscription')
+router.register(r'notifications', NotificationViewSet, basename='notification')
 router.register(r'connectors/twilio', TwilioViewSet, basename='twilio')
 router.register(r'connectors/sendgrid', SendgridViewSet, basename='sendgrid')
 

@@ -1,7 +1,7 @@
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.viewsets import ModelViewSet
 
-from authn.authentication import ServerAuthentication, ClientAuthentication, IsValidExternalUserId
+from authn.authentication import ServerAuthentication, ClientAuthentication, IsValidExternalId
 from user.models import User, UserPreference, UserSubscription
 from user.serializers import UserSerializer, UserPreferenceSerializer, UserSubscriptionSerializer
 
@@ -19,7 +19,7 @@ class UserPreferenceViewSet(ModelViewSet):
     queryset = UserPreference.objects.all()
     serializer_class = UserPreferenceSerializer
     authentication_classes = [ClientAuthentication]
-    permission_classes = [IsValidExternalUserId]
+    permission_classes = [IsValidExternalId]
 
     def get_queryset(self):
         user = User.objects.get(external_id=self.request.headers.get('X-External-Id'), account=self.request.user)
@@ -35,7 +35,7 @@ class UserSubscriptionViewSet(ModelViewSet):
     queryset = UserSubscription.objects.all()
     serializer_class = UserSubscriptionSerializer
     authentication_classes = [ClientAuthentication]
-    permission_classes = [IsValidExternalUserId]
+    permission_classes = [IsValidExternalId]
 
     def get_queryset(self):
         user = User.objects.get(external_id=self.request.headers.get('X-External-Id'), account=self.request.user)

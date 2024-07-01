@@ -7,7 +7,7 @@ from user.models import User, UserPreference, UserPreferenceChannel, UserSubscri
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ['external_id', 'first_name', 'last_name', 'email', 'phone']
+        fields = ['id', 'external_id', 'first_name', 'last_name', 'email', 'phone']
 
     def create(self, validated_data):
         validated_data['account'] = self.context['request'].user
@@ -33,8 +33,19 @@ class UserPreferenceSerializer(serializers.ModelSerializer):
         external_user = User.objects.get(external_id=self.context.get('external_id'))
         user_preference = UserPreference.objects.create(user=external_user, slug=validated_data['slug'])
 
-        for channel_data in channels_data:
-            UserPreferenceChannel.objects.create(user_preference=user_preference, **channel_data)
+        default_channels = [
+            {"slug": "web", "enabled": True},
+            {"slug": "email", "enabled": True},
+            {"slug": "sms", "enabled": True}
+        ]
+
+        for channel in channels_data:
+            for default_channel in default_channels:
+                if channel['slug'] == default_channel['slug']:
+                    default_channel.update(channel)
+
+        for channel in default_channels:
+            UserPreferenceChannel.objects.create(user_preference=user_preference, **channel)
         return user_preference
 
     @transaction.atomic

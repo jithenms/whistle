@@ -67,6 +67,7 @@ REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "authentication.middleware.ServerAuthentication",
         "authentication.middleware.ClientAuthentication",
+        "middlewares.JWTAuthenticationMiddleware",
     ),
 }
 

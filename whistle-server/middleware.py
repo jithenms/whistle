@@ -1,95 +1,116 @@
-import datetime
-from datetime import datetime
+import hashlib
+import hmac
 
-import os
 import jwt
+from django.conf import settings
 from jwt import PyJWKClient
-import pytz
-import requests
-from django.contrib.auth.models import User
-from django.core.cache import cache
-from jwt.algorithms import RSAAlgorithm
+from keycove import decrypt, generate_token, encrypt
+from rest_framework import exceptions
 from rest_framework.authentication import BaseAuthentication
-from rest_framework.exceptions import AuthenticationFailed
+from rest_framework.permissions import BasePermission
+
+from organization.models import Organization
 from account.models import Account
+from organization_member.models import OrganizationMember
+
+jwks_client = PyJWKClient(settings.JWKS_ENDPOINT)
 
 
-CLERK_API_URL = "https://api.clerk.com/v1"
-CLERK_FRONTEND_API_URL = os.getenv("CLERK_FRONTEND_API_URL")
-CLERK_SECRET_KEY = os.getenv("CLERK_SECRET_KEY")
-CACHE_KEY = "jwks_data"
+class ServerAuthentication(BaseAuthentication):
+    def authenticate(self, request, *args, **kwargs):
+        bearer_token = request.headers.get("Authorization")
+        if bearer_token is not None:
+            # token provided by clerk that contains claims
+            access_token = bearer_token.split()[1]
+            signing_key = jwks_client.get_signing_key_from_jwt(access_token)
+            try:
+                data = jwt.decode(
+                    access_token,
+                    signing_key.key,
+                    algorithms=["RS256"],
+                )
+            except jwt.PyJWTError as error:
+                print(error)
+                raise exceptions.AuthenticationFailed()
 
-jwks_client = PyJWKClient(f"{CLERK_FRONTEND_API_URL}/.well-known/jwks.json")
+            membership = get_membership(data)
 
-
-class JWTAuthenticationMiddleware(BaseAuthentication):
-    def authenticate(self, request):
-        auth_header = request.headers.get("Authorization")
-        if not auth_header:
-            return None
-        try:
-            token = auth_header.split(" ")[1]
-        except IndexError:
-            raise AuthenticationFailed("Bearer token not provided.")
-        user = self.decode_jwt(token)
-        clerk = ClerkSDK()
-        info, found = clerk.fetch_user_info(user.clerk_id)
-        if not user:
-            return None
+            return membership, None
         else:
-            if found:
-                user.org_id = info["org_id"]
-                user.email = info["email"]
-                user.first_name = info["first_name"]
-                user.last_name = info["last_name"]
-                user.last_login = info["last_login"]
-            user.save()
+            api_key = request.headers.get("X-API-Key")
+            api_secret = request.headers.get("X-API-Secret")
+            if api_key is None or api_secret is None:
+                raise exceptions.AuthenticationFailed()
+            else:
+                api_key_hash = hashlib.sha256(api_key.encode()).hexdigest()
+                try:
+                    org = Organization.objects.get(api_key_hash=api_key_hash)
+                except Organization.DoesNotExist:
+                    raise exceptions.AuthenticationFailed()
+                api_secret_hash = hashlib.sha256(
+                    (api_secret + org.api_secret_salt).encode()
+                ).hexdigest()
+                if api_secret_hash != org.api_secret_hash:
+                    raise exceptions.AuthenticationFailed()
+                else:
+                    return org, None
 
-        return user, None
 
-    def decode_jwt(self, token):
-        public_key = jwks_client.get_signing_key_from_jwt(token)
-        try:
-            payload = jwt.decode(
-                token,
-                public_key,
-                algorithms=["RS256"],
-                options={"verify_signature": True},
-            )
-        except jwt.ExpiredSignatureError:
-            raise AuthenticationFailed("Token has expired.")
-        except jwt.DecodeError as e:
-            raise AuthenticationFailed("Token decode error.")
-        except jwt.InvalidTokenError:
-            raise AuthenticationFailed("Invalid token.")
+class ClientAuthentication(BaseAuthentication):
+    def authenticate(self, request, *args, **kwargs):
+        bearer_token = request.headers.get("Authorization")
+        # if bearer_token is not None:
+        #     access_token = bearer_token.split()[1]
+        #     signing_key = jwks_client.get_signing_key_from_jwt(access_token)
+        #     try:
+        #         data = jwt.decode(
+        #             access_token,
+        #             signing_key.key,
+        #             algorithms=["RS256"],
+        #         )
+        #     except:
+        #         raise exceptions.AuthenticationFailed()
 
-        user_id = payload.get("sub")
-        if user_id:
-            return Account.objects.get(clerk_id=user_id)
-        return None
+        #     org, user = get_or_create_org_and_user(data)
 
-class ClerkSDK:
-    def fetch_user_info(self, clerk_id: str):
-        response = requests.get(
-            f"{CLERK_API_URL}/users/{clerk_id}",
-            headers={"Authorization": f"Bearer {CLERK_SECRET_KEY}"},
-        )
-        if response.status_code == 200:
-            data = response.json()
-            return {
-                "org_id": data["organization_id"],
-                "email_address": data["email_addresses"][0]["email_address"],
-                "first_name": data["first_name"],
-                "last_name": data["last_name"],
-                "last_login": datetime.datetime.fromtimestamp(
-                    data["last_sign_in_at"] / 1000, tz=pytz.UTC
-                ),
-            }, True
-        else:
-            return {
-                "org_id": "",
-                "email_address": "",
-                "first_name": "",
-                "last_name": "",
-                "last_login": None,
-            }, False
+        #     return org, None
+        # else:
+        #     api_key = request.headers.get('X-API-Key')
+        #     api_key_hash = hashlib.sha256(api_key.encode()).hexdigest()
+        #     try:
+        #         return Organization.objects.get(api_key_hash=api_key_hash), None
+        #     except:
+        #         raise exceptions.AuthenticationFailed()
+
+
+class IsValidExternalId(BasePermission):
+    def has_permission(self, request, view):
+        external_id = request.headers.get("X-External-Id")
+        # external_id_hmac = request.headers.get('X-External-Id-Hmac')
+        # api_secret = decrypt(request.user.api_secret_encrypt, settings.WHISTLE_SECRET_KEY)
+        # if external_id is not None or external_id_hmac is not None:
+        #     external_id_check = hmac.new(api_secret.encode(),
+        #                                  external_id.encode(),
+        #                                  hashlib.sha256).hexdigest()
+        #     return external_id_check == external_id_hmac
+        # else:
+        #     return False
+
+
+def get_membership(data):
+    membership = OrganizationMember.objects.get(
+        account__clerk_user_id=data["user_id"],
+        organization__clerk_org_id=data["org_id"],
+    )
+    return membership
+
+
+def generate_api_credentials():
+    api_key = generate_token(16)
+    # api_secret = generate_token(32)
+    # api_secret_salt = generate_token(8)
+    # api_key_encrypt = encrypt(api_key, settings.WHISTLE_SECRET_KEY)
+    # api_secret_encrypt = encrypt(api_secret, settings.WHISTLE_SECRET_KEY)
+    # api_key_hash = hashlib.sha256(api_key.encode()).hexdigest()
+    # api_secret_hash = hashlib.sha256((api_secret + api_secret_salt).encode()).hexdigest()
+    # return api_key_encrypt, api_key_hash, api_secret_encrypt, api_secret_hash, api_secret_salt

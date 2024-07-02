@@ -1,9 +1,10 @@
+import uuid
 from django.db import models
 
 
 class Account(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    clerk_id = models.CharField(max_length=255, unique=True)
+    clerk_user_id = models.CharField(max_length=255, unique=True)
     email = models.EmailField(max_length=255, unique=True)
     full_name = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)

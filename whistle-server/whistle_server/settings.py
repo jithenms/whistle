@@ -41,10 +41,11 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     "rest_framework",
-    "authn",
+    "authentication",
     "connector",
     "notification",
-    "user"
+    "user",
+    "organization"
 ]
 
 MIDDLEWARE = [
@@ -62,8 +63,8 @@ REST_FRAMEWORK = {
         'rest_framework.renderers.JSONRenderer',
     ),
     'DEFAULT_AUTHENTICATION_CLASSES': (
-        'authn.authentication.ServerAuthentication',
-        'authn.authentication.ClientAuthentication',
+        'authentication.middleware.ServerAuthentication',
+        'authentication.middleware.ClientAuthentication',
     )
 }
 

@@ -4,9 +4,9 @@ from keycove import decrypt
 from rest_framework import viewsets
 from rest_framework.generics import RetrieveAPIView
 
-from authn.authentication import ServerAuthentication
-from authn.models import Organization
-from authn.serializers import OrganizationSerializer
+from authentication.middleware import ServerAuthentication
+from organization.models import Organization
+from organization.serializers import OrganizationSerializer
 
 
 class OrganizationModelViewSet(viewsets.GenericViewSet):

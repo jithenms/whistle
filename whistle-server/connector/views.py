@@ -1,6 +1,6 @@
 from rest_framework.viewsets import ModelViewSet
 
-from authn.authentication import ServerAuthentication
+from authentication.middleware import ServerAuthentication
 from connector.models import Twilio, Sendgrid
 from connector.serializers import TwilioSerializer, SendgridSerializer
 

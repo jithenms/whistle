@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from authn.models import Organization
+from organization.models import Organization
 
 
 class OrganizationSerializer(serializers.ModelSerializer):
@@ -8,4 +8,3 @@ class OrganizationSerializer(serializers.ModelSerializer):
         model = Organization
         fields = ['id', 'name', 'slug']
         read_only_fields = ('name', 'slug')
-

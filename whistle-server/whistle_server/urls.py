@@ -18,7 +18,7 @@ from django.contrib import admin
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 
-from authn.views import OrganizationViewSet
+from organization.views import OrganizationViewSet
 from connector.views import SendgridViewSet, TwilioViewSet
 from notification.views import NotificationViewSet
 from user.views import UserViewSet, UserPreferenceViewSet, UserSubscriptionViewSet

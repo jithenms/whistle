@@ -1,7 +1,7 @@
 import uuid
 from django.db import models
 
-from authn.models import Organization
+from organization.models import Organization
 
 
 class Twilio(models.Model):

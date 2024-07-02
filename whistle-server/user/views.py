@@ -1,7 +1,6 @@
-from rest_framework.permissions import IsAuthenticated
 from rest_framework.viewsets import ModelViewSet
 
-from authn.authentication import ServerAuthentication, ClientAuthentication, IsValidExternalId
+from authentication.middleware import ServerAuthentication, ClientAuthentication, IsValidExternalId
 from user.models import User, UserPreference, UserSubscription
 from user.serializers import UserSerializer, UserPreferenceSerializer, UserSubscriptionSerializer
 

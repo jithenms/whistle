@@ -9,7 +9,7 @@ from rest_framework import exceptions
 from rest_framework.authentication import BaseAuthentication
 from rest_framework.permissions import BasePermission
 
-import authn.models as authn
+from organization.models import Organization, OrganizationUser
 
 jwks_client = PyJWKClient(settings.JWKS_ENDPOINT)
 
@@ -30,9 +30,7 @@ class ServerAuthentication(BaseAuthentication):
                 print(error)
                 raise exceptions.AuthenticationFailed()
 
-            org = get_or_create_org(data)
-
-            get_or_create_user(data, org)
+            org, user = get_or_create_org_and_user(data)
 
             return org, None
         else:
@@ -43,8 +41,8 @@ class ServerAuthentication(BaseAuthentication):
             else:
                 api_key_hash = hashlib.sha256(api_key.encode()).hexdigest()
                 try:
-                    org = authn.Organization.objects.get(api_key_hash=api_key_hash)
-                except authn.Organization.DoesNotExist:
+                    org = Organization.objects.get(api_key_hash=api_key_hash)
+                except Organization.DoesNotExist:
                     raise exceptions.AuthenticationFailed()
                 api_secret_hash = hashlib.sha256((api_secret + org.api_secret_salt).encode()).hexdigest()
                 if api_secret_hash != org.api_secret_hash:
@@ -68,16 +66,14 @@ class ClientAuthentication(BaseAuthentication):
             except:
                 raise exceptions.AuthenticationFailed()
 
-            org = get_or_create_org(data)
-
-            get_or_create_user(data, org)
+            org, user = get_or_create_org_and_user(data)
 
             return org, None
         else:
             api_key = request.headers.get('X-API-Key')
             api_key_hash = hashlib.sha256(api_key.encode()).hexdigest()
             try:
-                return authn.Organization.objects.get(api_key_hash=api_key_hash), None
+                return Organization.objects.get(api_key_hash=api_key_hash), None
             except:
                 raise exceptions.AuthenticationFailed()
 
@@ -96,16 +92,8 @@ class IsValidExternalId(BasePermission):
             return False
 
 
-def get_or_create_user(data, org):
-    authn.User.objects.get_or_create(clerk_user_id=data['user_id'], organization=org,
-                                     defaults={
-                                         "full_name": data['full_name'],
-                                         "primary_email": data['primary_email']
-                                     })
-
-
-def get_or_create_org(data):
-    org, org_created = authn.Organization.objects.get_or_create(clerk_org_id=data['org_id'], defaults={
+def get_or_create_org_and_user(data):
+    org, org_created = Organization.objects.get_or_create(clerk_org_id=data['org_id'], defaults={
         "slug": data['org_slug'], "name": data['org_name']
     })
     if org_created:
@@ -117,7 +105,14 @@ def get_or_create_org(data):
         org.api_secret_hash = api_secret_hash
         org.api_secret_salt = api_secret_salt
         org.save()
-    return org
+
+    user = OrganizationUser.objects.get_or_create(clerk_user_id=data['user_id'], organization=org,
+                                                  defaults={
+                                                      "full_name": data['full_name'],
+                                                      "primary_email": data['primary_email']
+                                                  })
+
+    return org, user
 
 
 def generate_api_credentials():

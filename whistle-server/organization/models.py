@@ -18,7 +18,7 @@ class Organization(models.Model):
     api_secret_salt = models.CharField(max_length=255, unique=True)
 
 
-class User(models.Model):
+class OrganizationUser(models.Model):
     id = models.UUIDField(
         primary_key=True,
         default=uuid.uuid4,

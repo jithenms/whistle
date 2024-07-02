@@ -4,7 +4,7 @@ import hmac
 import jwt
 from django.conf import settings
 from jwt import PyJWKClient
-from keycove import decrypt
+from keycove import decrypt, generate_token, encrypt
 from rest_framework import exceptions
 from rest_framework.authentication import BaseAuthentication
 from rest_framework.permissions import BasePermission
@@ -29,11 +29,11 @@ class ServerAuthentication(BaseAuthentication):
                     algorithms=["RS256"],
                 )
 
-                org = Organization.objects.get(clerk_org_id=data["org_id"])
+                user = get_or_create_user(data)
 
-                user = User.objects.get(clerk_user_id=data["user_id"])
+                org = get_or_create_organization(data)
 
-                member = OrganizationMember.objects.get(organization=org, user=user)
+                member = get_or_create_organization_member(data, user, org)
 
                 return org, None
             except (
@@ -78,11 +78,11 @@ class ClientAuthentication(BaseAuthentication):
                     algorithms=["RS256"],
                 )
 
-                org = Organization.objects.get(clerk_org_id=data["org_id"])
+                user = get_or_create_user(data)
 
-                user = User.objects.get(clerk_user_id=data["user_id"])
+                org = get_or_create_organization(data)
 
-                member = OrganizationMember.objects.get(organization=org, user=user)
+                member = get_or_create_organization_member(data, user, org)
 
                 return org, None
             except (
@@ -118,3 +118,63 @@ class IsValidExternalId(BasePermission):
             return external_id_check == external_id_hmac
         else:
             return False
+
+
+def get_or_create_user(data):
+    user, user_created = User.objects.get_or_create(
+        clerk_user_id=data["user_id"],
+        defaults={
+            "full_name": data["full_name"],
+            "email": data["primary_email"],
+        },
+    )
+    return user
+
+
+def get_or_create_organization(data):
+    org, org_created = Organization.objects.get_or_create(
+        clerk_org_id=data["org_id"],
+        defaults={"slug": data["org_slug"], "name": data["org_name"]},
+    )
+    if org_created:
+        (
+            api_key_encrypt,
+            api_key_hash,
+            api_secret_encrypt,
+            api_secret_hash,
+            api_secret_salt,
+        ) = generate_api_credentials()
+
+        org.api_key_encrypt = api_key_encrypt
+        org.api_key_hash = api_key_hash
+        org.api_secret_encrypt = api_secret_encrypt
+        org.api_secret_hash = api_secret_hash
+        org.api_secret_salt = api_secret_salt
+        org.save()
+    return org
+
+
+def get_or_create_organization_member(data, user, org):
+    org_member, org_member_created = OrganizationMember.objects.get_or_create(
+        organization=org, user=user, defaults={"role": data["org_role"]}
+    )
+    return org_member
+
+
+def generate_api_credentials():
+    api_key = generate_token(16)
+    api_secret = generate_token(32)
+    api_secret_salt = generate_token(8)
+    api_key_encrypt = encrypt(api_key, settings.WHISTLE_SECRET_KEY)
+    api_secret_encrypt = encrypt(api_secret, settings.WHISTLE_SECRET_KEY)
+    api_key_hash = hashlib.sha256(api_key.encode()).hexdigest()
+    api_secret_hash = hashlib.sha256(
+        (api_secret + api_secret_salt).encode()
+    ).hexdigest()
+    return (
+        api_key_encrypt,
+        api_key_hash,
+        api_secret_encrypt,
+        api_secret_hash,
+        api_secret_salt,
+    )

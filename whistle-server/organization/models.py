@@ -21,3 +21,4 @@ class OrganizationMember(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE)
     user = models.ForeignKey(User, on_delete=models.PROTECT)
+    role = models.CharField(max_length=255)

@@ -27,7 +27,6 @@ from external_user.views import (
 )
 from notification.views import NotificationViewSet
 from organization.views import OrganizationViewSet
-from webhook.views import ClerkWebhookViewSet
 
 router = DefaultRouter()
 router.register(r"organizations", OrganizationViewSet, basename="organization")
@@ -39,7 +38,6 @@ router.register(
 router.register(r"notifications", NotificationViewSet, basename="notification")
 router.register(r"connectors/twilio", TwilioViewSet, basename="connector.twilio")
 router.register(r"connectors/sendgrid", SendgridViewSet, basename="connector.sendgrid")
-router.register(r"webhooks/clerk", ClerkWebhookViewSet, basename="webhook.clerk")
 
 urlpatterns = [
     path("admin/", admin.site.urls),

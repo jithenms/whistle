@@ -47,7 +47,6 @@ INSTALLED_APPS = [
     "external_user",
     "organization",
     "user",
-    "webhook",
 ]
 
 MIDDLEWARE = [
@@ -140,5 +139,4 @@ CELERY_TASK_SERIALIZER = "json"
 CELERY_TASK_TRACK_STARTED = True
 
 WHISTLE_SECRET_KEY = os.getenv("WHISTLE_SECRET_KEY")
-CLERK_WEBHOOK_SECRET = os.getenv("CLERK_WEBHOOK_SECRET")
 JWKS_ENDPOINT = os.getenv("JWKS_ENDPOINT")

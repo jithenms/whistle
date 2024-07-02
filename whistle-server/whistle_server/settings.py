@@ -42,12 +42,14 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "rest_framework",
+    "rest_framework_api_key",
     "authentication",
     "connector",
     "notification",
     "user",
     "organization",
-    "org_user",
+    "organization_member",
+    "account",
 ]
 
 MIDDLEWARE = [

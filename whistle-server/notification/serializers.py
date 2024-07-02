@@ -1,7 +1,7 @@
 from rest_framework import serializers
 
+from external_user.serializers import ExternalUserSerializer
 from notification.models import Notification
-from user.serializers import UserSerializer
 
 
 class ChannelEmailSerializer(serializers.Serializer):
@@ -19,7 +19,7 @@ class NotificationChannelsSerializer(serializers.Serializer):
 
 
 class NotificationSerializer(serializers.ModelSerializer):
-    recipient = UserSerializer(read_only=True)
+    recipient = ExternalUserSerializer(read_only=True)
 
     seen_at = serializers.DateTimeField(required=False)
     read_at = serializers.DateTimeField(required=False)

@@ -2,7 +2,7 @@ import uuid
 
 from django.db import models
 
-from account.models import Account
+from user.models import User
 
 
 class Organization(models.Model):
@@ -20,4 +20,4 @@ class Organization(models.Model):
 class OrganizationMember(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE)
-    account = models.ForeignKey(Account, on_delete=models.PROTECT)
+    user = models.ForeignKey(User, on_delete=models.PROTECT)

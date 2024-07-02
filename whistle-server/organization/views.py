@@ -6,7 +6,7 @@ from rest_framework.generics import RetrieveAPIView
 
 from organization.models import Organization
 from organization.serializers import OrganizationSerializer
-from whistle_server.middleware import ServerAuthentication, JWTAuthentication
+from whistle_server.middleware import ServerAuthentication
 
 
 class OrganizationModelViewSet(viewsets.GenericViewSet):
@@ -18,7 +18,7 @@ class OrganizationViewSet(RetrieveAPIView, OrganizationModelViewSet):
     lookup_field = "clerk_org_id"
     queryset = Organization.objects.all()
     serializer_class = OrganizationSerializer
-    authentication_classes = [ServerAuthentication | JWTAuthentication]
+    authentication_classes = [ServerAuthentication]
 
     def retrieve(self, request, *args, **kwargs):
         instance = self.get_object()

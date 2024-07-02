@@ -6,16 +6,22 @@ from twilio.rest import Client
 from connector.models import Twilio, Sendgrid
 from notification.serializers import NotificationSerializer
 from organization.models import Organization
-from user.models import User, UserPreference, UserSubscription
+from external_user.models import (
+    ExternalUser,
+    ExternalUserPreference,
+    ExternalUserSubscription,
+)
 from whistle_server.celery import app
 
 
 @app.task
 def send_notification(external_id, org_id, payload):
     org_entity = Organization.objects.get(pk=org_id)
-    user_entity = User.objects.get(organization=org_entity, external_id=external_id)
+    user_entity = ExternalUser.objects.get(
+        organization=org_entity, external_id=external_id
+    )
     if "topic" in payload:
-        subscription_entity = UserSubscription.objects.prefetch_related(
+        subscription_entity = ExternalUserSubscription.objects.prefetch_related(
             "categories"
         ).filter(user=user_entity, topic=payload["topic"])
         if not subscription_entity:
@@ -32,9 +38,9 @@ def send_notification(external_id, org_id, payload):
             else:
                 route_basic_notification(external_id, org_id, payload)
     elif "category" in payload:
-        preference_entity = UserPreference.objects.prefetch_related("channels").filter(
-            user=user_entity, slug=payload["category"]
-        )
+        preference_entity = ExternalUserPreference.objects.prefetch_related(
+            "channels"
+        ).filter(user=user_entity, slug=payload["category"])
 
         if not preference_entity:
             route_basic_notification(external_id, org_id, payload)
@@ -74,7 +80,9 @@ def route_basic_notification(external_id, org_id, payload):
 def send_sms(external_id, org_id, payload):
     try:
         org_entity = Organization.objects.get(pk=org_id)
-        user_entity = User.objects.get(organization=org_entity, external_id=external_id)
+        user_entity = ExternalUser.objects.get(
+            organization=org_entity, external_id=external_id
+        )
         twilio_connection = Twilio.objects.get(organization=org_entity)
 
         twilio_client = Client(
@@ -88,7 +96,11 @@ def send_sms(external_id, org_id, payload):
         )
 
         print(f"twilio sms status: {message.status}")
-    except (Twilio.DoesNotExist, Organization.DoesNotExist, User.DoesNotExist) as error:
+    except (
+        Twilio.DoesNotExist,
+        Organization.DoesNotExist,
+        ExternalUser.DoesNotExist,
+    ) as error:
         print(error)
         return
 
@@ -97,7 +109,9 @@ def send_sms(external_id, org_id, payload):
 def send_email(external_id, org_id, payload):
     try:
         org_entity = Organization.objects.get(pk=org_id)
-        user_entity = User.objects.get(organization=org_entity, external_id=external_id)
+        user_entity = ExternalUser.objects.get(
+            organization=org_entity, external_id=external_id
+        )
         sendgrid_conn = Sendgrid.objects.get(organization=org_entity)
         sg = SendGridAPIClient(api_key=sendgrid_conn.api_key)
 
@@ -113,7 +127,7 @@ def send_email(external_id, org_id, payload):
     except (
         Sendgrid.DoesNotExist,
         Organization.DoesNotExist,
-        User.DoesNotExist,
+        ExternalUser.DoesNotExist,
     ) as error:
         print(error)
         return
@@ -123,13 +137,15 @@ def send_email(external_id, org_id, payload):
 def send_web(external_id, org_id, payload):
     try:
         org_entity = Organization.objects.get(pk=org_id)
-        user_entity = User.objects.get(organization=org_entity, external_id=external_id)
+        user_entity = ExternalUser.objects.get(
+            organization=org_entity, external_id=external_id
+        )
         # todo implement sockets
         data = persist_notification(
             user_entity, org_entity, payload, sent_at=datetime.now(), status="delivered"
         )
         print(f"web push record: {data}")
-    except (Organization.DoesNotExist, User.DoesNotExist) as error:
+    except (Organization.DoesNotExist, ExternalUser.DoesNotExist) as error:
         print(error)
         return
 

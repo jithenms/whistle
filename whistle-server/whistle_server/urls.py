@@ -20,20 +20,26 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 
 from connector.views import SendgridViewSet, TwilioViewSet
+from external_user.views import (
+    ExternalUserViewSet,
+    ExternalUserPreferenceViewSet,
+    ExternalUserSubscriptionViewSet,
+)
 from notification.views import NotificationViewSet
 from organization.views import OrganizationViewSet
-from user.views import UserViewSet, UserPreferenceViewSet, UserSubscriptionViewSet
+from webhook.views import ClerkWebhookViewSet
 
 router = DefaultRouter()
 router.register(r"organizations", OrganizationViewSet, basename="organization")
-router.register(r"users/preferences", UserPreferenceViewSet, basename="preference")
+router.register(r"users", ExternalUserViewSet, basename="external_user")
+router.register(r"preferences", ExternalUserPreferenceViewSet, basename="preference")
 router.register(
-    r"users/subscriptions", UserSubscriptionViewSet, basename="subscription"
+    r"subscriptions", ExternalUserSubscriptionViewSet, basename="subscription"
 )
-router.register(r"users", UserViewSet, basename="user")
 router.register(r"notifications", NotificationViewSet, basename="notification")
-router.register(r"connectors/twilio", TwilioViewSet, basename="twilio")
-router.register(r"connectors/sendgrid", SendgridViewSet, basename="sendgrid")
+router.register(r"connectors/twilio", TwilioViewSet, basename="connector.twilio")
+router.register(r"connectors/sendgrid", SendgridViewSet, basename="connector.sendgrid")
+router.register(r"webhooks/clerk", ClerkWebhookViewSet, basename="webhook.clerk")
 
 urlpatterns = [
     path("admin/", admin.site.urls),

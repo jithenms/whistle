@@ -30,7 +30,8 @@ SECRET_KEY = "django-insecure-@(c=-ujufw7bh_te3svxorv@!q(2^a7v44=1u==@=6npwy0(#v
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+# for ngrok '*'
+ALLOWED_HOSTS = ["*"]
 
 # Application definition
 
@@ -44,9 +45,10 @@ INSTALLED_APPS = [
     "rest_framework",
     "connector",
     "notification",
-    "user",
+    "external_user",
     "organization",
-    "account",
+    "user",
+    "webhook",
 ]
 
 MIDDLEWARE = [
@@ -61,11 +63,6 @@ MIDDLEWARE = [
 
 REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": ("rest_framework.renderers.JSONRenderer",),
-    "DEFAULT_AUTHENTICATION_CLASSES": (
-        "whistle_server.middleware.ServerAuthentication",
-        "whistle_server.middleware.ClientAuthentication",
-        "whistle_server.middleware.JWTAuthentication",
-    ),
 }
 
 ROOT_URLCONF = "whistle_server.urls"
@@ -144,4 +141,5 @@ CELERY_TASK_SERIALIZER = "json"
 CELERY_TASK_TRACK_STARTED = True
 
 WHISTLE_SECRET_KEY = os.getenv("WHISTLE_SECRET_KEY")
+CLERK_WEBHOOK_SECRET = os.getenv("CLERK_WEBHOOK_SECRET")
 JWKS_ENDPOINT = os.getenv("JWKS_ENDPOINT")

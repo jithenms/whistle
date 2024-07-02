@@ -4,12 +4,11 @@ from rest_framework.generics import CreateAPIView
 from rest_framework.permissions import AllowAny
 from rest_framework.viewsets import GenericViewSet
 
+from external_user.models import ExternalUser
 from notification.models import Notification
 from notification.serializers import NotificationSerializer
 from notification.tasks import send_notification
-from user.models import User
 from whistle_server.middleware import (
-    JWTAuthentication,
     ClientAuthentication,
     ServerAuthentication,
     IsValidExternalId,
@@ -25,7 +24,7 @@ class NotificationViewSet(
 ):
     queryset = Notification.objects.all()
     serializer_class = NotificationSerializer
-    authentication_classes = [ClientAuthentication | JWTAuthentication]
+    authentication_classes = [ClientAuthentication]
     permission_classes = [AllowAny]
 
     def get_authenticators(self):
@@ -33,12 +32,12 @@ class NotificationViewSet(
             self.request.method == "POST"
             or self.request.headers.get("X-External-Id") is None
         ):
-            return [ServerAuthentication() | JWTAuthentication()]
+            return [ServerAuthentication()]
         return super(NotificationViewSet, self).get_authenticators()
 
     def get_queryset(self):
         if self.request.headers.get("X-External-Id") is not None:
-            user = User.objects.get(
+            user = ExternalUser.objects.get(
                 external_id=self.request.headers.get("X-External-Id")
             )
             return self.queryset.filter(organization=self.request.user, recipient=user)

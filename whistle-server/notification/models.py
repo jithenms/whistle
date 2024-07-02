@@ -9,7 +9,6 @@ status = (
     'failed', 'failed'
 )
 
-
 class Notification(models.Model):
     id = models.UUIDField(
         primary_key=True,

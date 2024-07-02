@@ -10,12 +10,12 @@ class Migration(migrations.Migration):
     initial = True
 
     dependencies = [
-        ("organization", "0001_initial"),
+        ("user", "0001_initial"),
     ]
 
     operations = [
         migrations.CreateModel(
-            name="Sendgrid",
+            name="Organization",
             fields=[
                 (
                     "id",
@@ -26,19 +26,18 @@ class Migration(migrations.Migration):
                         serialize=False,
                     ),
                 ),
-                ("from_email", models.CharField(max_length=255, unique=True)),
-                ("api_key", models.CharField(max_length=255, unique=True)),
-                (
-                    "organization",
-                    models.ForeignKey(
-                        on_delete=django.db.models.deletion.CASCADE,
-                        to="organization.organization",
-                    ),
-                ),
+                ("clerk_org_id", models.CharField(max_length=255)),
+                ("name", models.CharField(max_length=255)),
+                ("slug", models.SlugField(unique=True)),
+                ("api_key_encrypt", models.CharField(max_length=255, unique=True)),
+                ("api_key_hash", models.CharField(max_length=255, unique=True)),
+                ("api_secret_encrypt", models.CharField(max_length=255, unique=True)),
+                ("api_secret_hash", models.CharField(max_length=255, unique=True)),
+                ("api_secret_salt", models.CharField(max_length=255, unique=True)),
             ],
         ),
         migrations.CreateModel(
-            name="Twilio",
+            name="OrganizationMember",
             fields=[
                 (
                     "id",
@@ -49,14 +48,18 @@ class Migration(migrations.Migration):
                         serialize=False,
                     ),
                 ),
-                ("from_phone", models.CharField(max_length=255, unique=True)),
-                ("account_sid", models.CharField(max_length=255, unique=True)),
-                ("auth_token", models.CharField(max_length=255, unique=True)),
+                ("role", models.CharField(max_length=255)),
                 (
                     "organization",
                     models.ForeignKey(
                         on_delete=django.db.models.deletion.CASCADE,
                         to="organization.organization",
+                    ),
+                ),
+                (
+                    "user",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.PROTECT, to="user.user"
                     ),
                 ),
             ],

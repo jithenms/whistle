@@ -1,8 +1,8 @@
 from rest_framework.viewsets import ModelViewSet
 
-from authn.authentication import ServerAuthentication
 from connector.models import Twilio, Sendgrid
 from connector.serializers import TwilioSerializer, SendgridSerializer
+from whistle_server.middleware import ServerAuthentication
 
 
 class TwilioViewSet(ModelViewSet):
@@ -11,7 +11,7 @@ class TwilioViewSet(ModelViewSet):
     authentication_classes = [ServerAuthentication]
 
     def get_queryset(self):
-        return self.queryset.filter(account=self.request.user)
+        return self.queryset.filter(organization=self.request.user)
 
 
 class SendgridViewSet(ModelViewSet):
@@ -20,4 +20,4 @@ class SendgridViewSet(ModelViewSet):
     authentication_classes = [ServerAuthentication]
 
     def get_queryset(self):
-        return self.queryset.filter(account=self.request.user)
+        return self.queryset.filter(organization=self.request.user)

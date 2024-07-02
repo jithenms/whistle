@@ -1,6 +1,6 @@
 from django.apps import AppConfig
 
 
-class NotificationConfig(AppConfig):
+class ExternalUserConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
-    name = "notification"
+    name = "external_user"

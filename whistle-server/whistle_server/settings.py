@@ -42,13 +42,10 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "rest_framework",
-    "rest_framework_api_key",
-    "authentication",
     "connector",
     "notification",
     "user",
     "organization",
-    "organization_member",
     "account",
 ]
 
@@ -65,9 +62,9 @@ MIDDLEWARE = [
 REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": ("rest_framework.renderers.JSONRenderer",),
     "DEFAULT_AUTHENTICATION_CLASSES": (
-        "authentication.middleware.ServerAuthentication",
-        "authentication.middleware.ClientAuthentication",
-        "middlewares.JWTAuthenticationMiddleware",
+        "whistle_server.middleware.ServerAuthentication",
+        "whistle_server.middleware.ClientAuthentication",
+        "whistle_server.middleware.JWTAuthentication",
     ),
 }
 

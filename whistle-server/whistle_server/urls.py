@@ -14,25 +14,28 @@ Including another URLconf
     1. Import the include() function: from django.urls import include, path
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
+
 from django.contrib import admin
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 
-from organization.views import OrganizationViewSet
 from connector.views import SendgridViewSet, TwilioViewSet
 from notification.views import NotificationViewSet
+from organization.views import OrganizationViewSet
 from user.views import UserViewSet, UserPreferenceViewSet, UserSubscriptionViewSet
 
 router = DefaultRouter()
-router.register(r'organizations', OrganizationViewSet, basename='organization')
-router.register(r'users/preferences', UserPreferenceViewSet, basename='preference')
-router.register(r'users/subscriptions', UserSubscriptionViewSet, basename='subscription')
-router.register(r'users', UserViewSet, basename='user')
-router.register(r'notifications', NotificationViewSet, basename='notification')
-router.register(r'connectors/twilio', TwilioViewSet, basename='twilio')
-router.register(r'connectors/sendgrid', SendgridViewSet, basename='sendgrid')
+router.register(r"organizations", OrganizationViewSet, basename="organization")
+router.register(r"users/preferences", UserPreferenceViewSet, basename="preference")
+router.register(
+    r"users/subscriptions", UserSubscriptionViewSet, basename="subscription"
+)
+router.register(r"users", UserViewSet, basename="user")
+router.register(r"notifications", NotificationViewSet, basename="notification")
+router.register(r"connectors/twilio", TwilioViewSet, basename="twilio")
+router.register(r"connectors/sendgrid", SendgridViewSet, basename="sendgrid")
 
 urlpatterns = [
-    path('admin/', admin.site.urls),
-    path('api/v1/', include(router.urls)),
+    path("admin/", admin.site.urls),
+    path("api/v1/", include(router.urls)),
 ]

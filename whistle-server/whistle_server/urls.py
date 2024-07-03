@@ -25,7 +25,7 @@ from external_user.views import (
     ExternalUserPreferenceViewSet,
     ExternalUserSubscriptionViewSet,
 )
-from notification.views import NotificationViewSet
+from notification.views import NotificationViewSet, BatchNotificationViewSet
 from organization.views import OrganizationViewSet
 
 router = DefaultRouter()
@@ -34,6 +34,9 @@ router.register(r"users", ExternalUserViewSet, basename="external_user")
 router.register(r"preferences", ExternalUserPreferenceViewSet, basename="preference")
 router.register(
     r"subscriptions", ExternalUserSubscriptionViewSet, basename="subscription"
+)
+router.register(
+    r"notifications/batch", BatchNotificationViewSet, basename="notification_batch"
 )
 router.register(r"notifications", NotificationViewSet, basename="notification")
 router.register(r"connectors/twilio", TwilioViewSet, basename="connector.twilio")

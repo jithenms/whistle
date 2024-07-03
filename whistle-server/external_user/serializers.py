@@ -11,6 +11,11 @@ from external_user.models import (
 
 
 class ExternalUserSerializer(serializers.ModelSerializer):
+    first_name = serializers.CharField(max_length=255, required=False)
+    last_name = serializers.CharField(max_length=255, required=False)
+    email = serializers.CharField(max_length=255, required=False)
+    phone = serializers.CharField(max_length=255, required=False)
+
     class Meta:
         model = ExternalUser
         fields = ["id", "external_id", "first_name", "last_name", "email", "phone"]
@@ -35,12 +40,13 @@ class ExternalUserPreferenceSerializer(serializers.ModelSerializer):
 
     @transaction.atomic
     def create(self, validated_data):
+        org = self.context["request"].user
         channels_data = validated_data.pop("channels", [])
         external_user = ExternalUser.objects.get(
             external_id=self.context.get("external_id")
         )
         user_preference = ExternalUserPreference.objects.create(
-            user=external_user, slug=validated_data["slug"]
+            organization=org, user=external_user, slug=validated_data["slug"]
         )
 
         default_channels = [
@@ -108,12 +114,13 @@ class ExternalUserSubscriptionSerializer(serializers.ModelSerializer):
 
     @transaction.atomic
     def create(self, validated_data):
+        org = self.context["request"].user
         category_data = validated_data.pop("categories", [])
         external_user = ExternalUser.objects.get(
             external_id=self.context.get("external_id")
         )
         user_subscription = ExternalUserSubscription.objects.create(
-            user=external_user, topic=validated_data["topic"]
+            organization=org, user=external_user, topic=validated_data["topic"]
         )
 
         for cat in category_data:

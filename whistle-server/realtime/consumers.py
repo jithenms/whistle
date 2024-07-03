@@ -12,7 +12,7 @@ class NotificationConsumer(AsyncWebsocketConsumer):
         ):
             external_user = self.scope["external_user"]
             await self.channel_layer.group_add(
-                f"user_{external_user.external_id}", self.channel_name
+                f"user_{external_user.id}", self.channel_name
             )
             await self.accept(self.scope["api_key"])
         elif "api_key" in self.scope:

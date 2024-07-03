@@ -1,7 +1,11 @@
 from rest_framework import serializers
 
+from external_user.models import ExternalUser
 from external_user.serializers import ExternalUserSerializer
-from notification.models import Notification
+from notification.models import (
+    Notification,
+    BatchNotification,
+)
 
 
 class ChannelEmailSerializer(serializers.Serializer):
@@ -25,8 +29,6 @@ class NotificationSerializer(serializers.ModelSerializer):
     read_at = serializers.DateTimeField(required=False)
     archived_at = serializers.DateTimeField(required=False)
 
-    channels = NotificationChannelsSerializer(required=False)
-
     class Meta:
         model = Notification
         fields = [
@@ -41,7 +43,6 @@ class NotificationSerializer(serializers.ModelSerializer):
             "sent_at",
             "seen_at",
             "read_at",
-            "channels",
             "archived_at",
         ]
         read_only_fields = ("recipient", "sent_at", "status")
@@ -51,3 +52,40 @@ class NotificationSerializer(serializers.ModelSerializer):
             if field in validated_data:
                 validated_data.pop(field)
         return super().update(instance, validated_data)
+
+
+class BatchNotificationSerializer(serializers.ModelSerializer):
+    recipients = ExternalUserSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = BatchNotification
+        fields = [
+            "id",
+            "recipients",
+            "category",
+            "topic",
+            "title",
+            "status",
+            "content",
+        ]
+        read_only_fields = ("status",)
+
+    def create(self, validated_data):
+        recipients = self.initial_data["recipients"]
+
+        batch_notification = BatchNotification(**validated_data)
+        batch_notification.save()
+
+        recipient_entities = []
+
+        for recipient in recipients:
+            try:
+                recipient_entities.append(
+                    ExternalUser.objects.get(external_id=recipient["external_id"])
+                )
+            except ExternalUser.DoesNotExist:
+                continue
+
+        batch_notification.recipients.set(recipient_entities)
+
+        return batch_notification

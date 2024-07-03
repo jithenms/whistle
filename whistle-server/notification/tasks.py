@@ -1,5 +1,7 @@
 from datetime import datetime
 
+from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
 from sendgrid import SendGridAPIClient, Email, To, Content, Mail
 from twilio.rest import Client
 
@@ -140,9 +142,13 @@ def send_web(external_id, org_id, payload):
         user_entity = ExternalUser.objects.get(
             organization=org_entity, external_id=external_id
         )
-        # todo implement sockets
         data = persist_notification(
             user_entity, org_entity, payload, sent_at=datetime.now(), status="delivered"
+        )
+        channel_layer = get_channel_layer()
+        async_to_sync(channel_layer.group_send)(
+            f"user_{external_id}",
+            {"object": "event", "type": "notification.created", "data": data},
         )
         print(f"web push record: {data}")
     except (Organization.DoesNotExist, ExternalUser.DoesNotExist) as error:

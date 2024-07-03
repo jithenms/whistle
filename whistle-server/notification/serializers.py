@@ -55,7 +55,8 @@ class NotificationSerializer(serializers.ModelSerializer):
 
 
 class BatchNotificationSerializer(serializers.ModelSerializer):
-    recipients = ExternalUserSerializer(many=True, read_only=True)
+    recipients = ExternalUserSerializer(many=True)
+    channels = NotificationChannelsSerializer(required=False)
 
     class Meta:
         model = BatchNotification
@@ -64,6 +65,7 @@ class BatchNotificationSerializer(serializers.ModelSerializer):
             "recipients",
             "category",
             "topic",
+            "channels",
             "title",
             "status",
             "content",
@@ -71,21 +73,17 @@ class BatchNotificationSerializer(serializers.ModelSerializer):
         read_only_fields = ("status",)
 
     def create(self, validated_data):
-        recipients = self.initial_data["recipients"]
+        recipients = validated_data["recipients"]
+        del validated_data["recipients"]
+        del validated_data["channels"]
 
         batch_notification = BatchNotification(**validated_data)
         batch_notification.save()
 
-        recipient_entities = []
-
         for recipient in recipients:
-            try:
-                recipient_entities.append(
-                    ExternalUser.objects.get(external_id=recipient["external_id"])
-                )
-            except ExternalUser.DoesNotExist:
-                continue
-
-        batch_notification.recipients.set(recipient_entities)
+            lookup_field = "external_id" if "external_id" in recipient else "email"
+            batch_notification.recipients.add(
+                ExternalUser.objects.get(**{lookup_field: recipient[lookup_field]})
+            )
 
         return batch_notification

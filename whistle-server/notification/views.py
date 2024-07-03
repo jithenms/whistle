@@ -68,22 +68,8 @@ class BatchNotificationViewSet(
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         batch_id = uuid.uuid4()
-        send_batch_notification.delay(
-            batch_id,
-            self.request.user.id,
-            {
-                "recipients": request.data["recipients"],
-                "channels": request.data["channels"],
-                **serializer.data,
-            },
-        )
+        send_batch_notification.delay(batch_id, self.request.user.id, serializer.data)
         return JsonResponse(
-            {
-                "id": batch_id,
-                "recipients": request.data["recipients"],
-                **serializer.data,
-                "channels": request.data["channels"],
-                "status": "queued",
-            },
+            {"id": batch_id, **serializer.data},
             status=status.HTTP_200_OK,
         )

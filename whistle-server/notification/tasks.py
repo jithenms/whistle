@@ -6,121 +6,181 @@ from sendgrid import SendGridAPIClient, Email, To, Content, Mail
 from twilio.rest import Client
 
 from connector.models import Twilio, Sendgrid
-from notification.serializers import NotificationSerializer
-from organization.models import Organization
+from notification.serializers import NotificationSerializer, BatchNotificationSerializer
 from external_user.models import (
-    ExternalUser,
     ExternalUserPreference,
     ExternalUserSubscription,
+    ExternalUser,
 )
 from whistle_server.celery import app
 
+# todo store error info and delivery data in db
+
 
 @app.task
-def send_notification(external_id, org_id, payload):
-    org_entity = Organization.objects.get(pk=org_id)
-    user_entity = ExternalUser.objects.get(
-        organization=org_entity, external_id=external_id
+def send_batch_notification(batch_id, org_id, data):
+    recipient_external_ids = set(
+        recipient["external_id"] for recipient in data["recipients"]
     )
-    if "topic" in payload:
-        subscription_entity = ExternalUserSubscription.objects.prefetch_related(
-            "categories"
-        ).filter(user=user_entity, topic=payload["topic"])
-        if not subscription_entity:
-            route_basic_notification(external_id, org_id, payload)
-        else:
-            if "category" in payload:
-                category_entity = subscription_entity.first().categories.filter(
-                    slug=payload["category"]
-                )
-                if not category_entity:
-                    route_basic_notification(external_id, org_id, payload)
-                elif category_entity.first().enabled:
-                    route_basic_notification(external_id, org_id, payload)
+
+    if "category" in data and not "topic" in data:
+        for rec in data["recipients"]:
+            recipient = ExternalUser.objects.filter(
+                organization_id=org_id, external_id=rec["external_id"]
+            )
+
+            if not recipient:
+                continue
+
+            preference = ExternalUserPreference.objects.prefetch_related(
+                "channels"
+            ).filter(user_id=recipient.first().id, slug=data["category"])
+
+            if not preference:
+                route_basic_notification(batch_id, org_id, recipient.first().id, data)
             else:
-                route_basic_notification(external_id, org_id, payload)
-    elif "category" in payload:
-        preference_entity = ExternalUserPreference.objects.prefetch_related(
-            "channels"
-        ).filter(user=user_entity, slug=payload["category"])
+                route_notification_with_preference(
+                    batch_id,
+                    org_id,
+                    recipient.first().id,
+                    preference.first().channels.all(),
+                    data,
+                )
 
-        if not preference_entity:
-            route_basic_notification(external_id, org_id, payload)
-        else:
-            web_preference_entity = preference_entity.first().channels.get(slug="web")
+    elif "topic" in data:
+        subscribers = ExternalUserSubscription.objects.filter(
+            organization_id=org_id, topic=data["topic"]
+        )
 
-            if web_preference_entity.enabled:
-                send_web.delay(external_id, org_id, payload)
+        if "category" in data:
+            for rec in data["recipients"]:
+                recipient = ExternalUser.objects.filter(
+                    organization_id=org_id, external_id=rec["external_id"]
+                )
 
-            if "channels" in payload:
-                if "sms" in payload["channels"]:
-                    sms_preference_entity = preference_entity.channels.get(slug="sms")
-                    if sms_preference_entity.enabled:
-                        send_sms.delay(external_id, org_id, payload)
+                if not recipient:
+                    continue
 
-                if "email" in payload["channels"]:
-                    email_preference_entity = preference_entity.channels.get(
-                        slug="email"
+                preference = ExternalUserPreference.objects.prefetch_related(
+                    "channels"
+                ).filter(user_id=recipient.first().id, slug=data["category"])
+
+                if not preference:
+                    route_basic_notification(
+                        batch_id, org_id, recipient.first().id, data
                     )
-                    if email_preference_entity.enabled:
-                        send_email.delay(external_id, org_id, payload)
+                else:
+                    route_notification_with_preference(
+                        batch_id,
+                        org_id,
+                        recipient.first().id,
+                        preference.first().channels.all(),
+                        data,
+                    )
+            for subscriber in subscribers:
+                if subscriber.user.external_id in recipient_external_ids:
+                    continue
+
+                subscriber_category = subscriber.categories.filter(
+                    slug=data["category"]
+                )
+
+                preference = ExternalUserPreference.objects.prefetch_related(
+                    "channels"
+                ).filter(user_id=subscriber.user.id, slug=data["category"])
+
+                if subscriber_category:
+                    if not preference and subscriber_category.first().enabled:
+                        route_basic_notification(
+                            batch_id, org_id, subscriber.user.id, data
+                        )
+                    elif preference and subscriber_category.first().enabled:
+                        route_notification_with_preference(
+                            batch_id,
+                            org_id,
+                            subscriber.user.id,
+                            preference.first().channels.all(),
+                            data,
+                        )
+        else:
+            for rec in data["recipients"]:
+                recipient = ExternalUser.objects.filter(
+                    organization_id=org_id, external_id=rec["external_id"]
+                )
+
+                if not recipient:
+                    continue
+
+                route_basic_notification(batch_id, org_id, recipient.first().id, data)
+            for subscriber in subscribers:
+                if subscriber.user.external_id in recipient_external_ids:
+                    continue
+                route_basic_notification(batch_id, org_id, subscriber.user.id, data)
     else:
-        route_basic_notification(external_id, org_id, payload)
+        for rec in data["recipients"]:
+            recipient = ExternalUser.objects.filter(
+                organization_id=org_id, external_id=rec["external_id"]
+            )
+
+            if not recipient:
+                continue
+
+            route_basic_notification(batch_id, org_id, recipient.first().id, data)
+
+    persist_batch_notification(batch_id, org_id, data, status="processed")
 
 
-def route_basic_notification(external_id, org_id, payload):
-    send_web.delay(external_id, org_id, payload)
-    if "channels" in payload:
-        if "sms" in payload["channels"]:
-            send_sms.delay(external_id, org_id, payload)
+def route_notification_with_preference(batch_id, org_id, user_id, channels, data):
+    web_preference_entity = channels.get(slug="web")
+    if web_preference_entity.enabled:
+        send_web.delay(batch_id, org_id, user_id, data)
+    if "channels" in data:
+        if "sms" in data["channels"]:
+            sms_preference_entity = channels.get(slug="sms")
+            if sms_preference_entity.enabled:
+                send_sms.delay(batch_id, org_id, user_id, data)
 
-        if "email" in payload["channels"]:
-            send_email.delay(external_id, org_id, payload)
+        if "email" in data["channels"]:
+            email_preference_entity = channels.get(slug="email")
+            if email_preference_entity.enabled:
+                send_email.delay(batch_id, org_id, user_id, data)
 
 
 @app.task
-def send_sms(external_id, org_id, payload):
+def send_sms(batch_id, org_id, user_id, data):
     try:
-        org_entity = Organization.objects.get(pk=org_id)
-        user_entity = ExternalUser.objects.get(
-            organization=org_entity, external_id=external_id
-        )
-        twilio_connection = Twilio.objects.get(organization=org_entity)
+        user = ExternalUser.objects.get(id=user_id)
+        twilio_connection = Twilio.objects.get(organization_id=org_id)
 
         twilio_client = Client(
             twilio_connection.account_sid, twilio_connection.auth_token
         )
 
         message = twilio_client.messages.create(
-            to=user_entity.phone,
+            to=user.phone,
             from_=twilio_connection.from_phone,
-            body=payload["channels"]["sms"]["body"],
+            body=data["channels"]["sms"]["body"],
         )
 
         print(f"twilio sms status: {message.status}")
     except (
         Twilio.DoesNotExist,
-        Organization.DoesNotExist,
         ExternalUser.DoesNotExist,
     ) as error:
         print(error)
-        return
 
 
 @app.task
-def send_email(external_id, org_id, payload):
+def send_email(batch_id, org_id, user_id, data):
     try:
-        org_entity = Organization.objects.get(pk=org_id)
-        user_entity = ExternalUser.objects.get(
-            organization=org_entity, external_id=external_id
-        )
-        sendgrid_conn = Sendgrid.objects.get(organization=org_entity)
+        user = ExternalUser.objects.get(id=user_id)
+        sendgrid_conn = Sendgrid.objects.get(organization_id=org_id)
         sg = SendGridAPIClient(api_key=sendgrid_conn.api_key)
 
         from_email = Email(sendgrid_conn.from_email)
-        to_email = To(user_entity.email)
-        subject = payload["channels"]["email"]["subject"]
-        content = Content("text/plain", payload["channels"]["email"]["content"])
+        to_email = To(user.email)
+        subject = data["channels"]["email"]["subject"]
+        content = Content("text/plain", data["channels"]["email"]["content"])
         mail = Mail(from_email, to_email, subject, content)
         response = sg.client.mail.send.post(request_body=mail.get())
         print(
@@ -128,7 +188,6 @@ def send_email(external_id, org_id, payload):
         )
     except (
         Sendgrid.DoesNotExist,
-        Organization.DoesNotExist,
         ExternalUser.DoesNotExist,
     ) as error:
         print(error)
@@ -136,33 +195,60 @@ def send_email(external_id, org_id, payload):
 
 
 @app.task
-def send_web(external_id, org_id, payload):
+def send_web(batch_id, org_id, user_id, data):
     try:
-        org_entity = Organization.objects.get(pk=org_id)
-        user_entity = ExternalUser.objects.get(
-            organization=org_entity, external_id=external_id
-        )
-        data = persist_notification(
-            user_entity, org_entity, payload, sent_at=datetime.now(), status="delivered"
-        )
+        user = ExternalUser.objects.get(pk=user_id)
         channel_layer = get_channel_layer()
         async_to_sync(channel_layer.group_send)(
-            f"user_{external_id}",
-            {"object": "event", "type": "notification.created", "data": data},
+            f"user_{user_id}",
+            {
+                "object": "event",
+                "type": "notification.created",
+                "data": {
+                    "category": data.get("category"),
+                    "topic": data.get("topic"),
+                    "title": data["title"],
+                    "content": data["content"],
+                    "action_link": data.get("action_link"),
+                },
+            },
+        )
+        data = persist_notification(
+            org_id, user.id, data, status="delivered", sent_at=datetime.now()
         )
         print(f"web push record: {data}")
-    except (Organization.DoesNotExist, ExternalUser.DoesNotExist) as error:
+    except ExternalUser.DoesNotExist as error:
         print(error)
         return
 
 
-def persist_notification(recipient, org, payload, **kwargs):
-    serializer_data = {
-        key: value
-        for key, value in payload.items()
-        if key not in ["external_id", "channels"]
-    }
-    serializer = NotificationSerializer(data=serializer_data)
+def route_basic_notification(batch_id, org_id, user_id, data):
+    print(data)
+    send_web.delay(batch_id, org_id, user_id, data)
+    if "channels" in data:
+        if "sms" in data["channels"]:
+            send_sms.delay(batch_id, org_id, user_id, data)
+
+        if "email" in data["channels"]:
+            send_email.delay(batch_id, org_id, user_id, data)
+
+
+def persist_batch_notification(batch_id, org_id, data, **kwargs):
+    serializer = BatchNotificationSerializer(data=data)
     serializer.is_valid(raise_exception=True)
-    serializer.save(organization=org, recipient=recipient, **kwargs)
+    serializer.save(id=batch_id, organization_id=org_id, **kwargs)
+    return serializer.data
+
+
+def persist_notification(org_id, user_id, data, **kwargs):
+    print(data)
+    if "channels" in data:
+        del data["channels"]
+
+    if "recipients" in data:
+        del data["recipients"]
+
+    serializer = NotificationSerializer(data=data)
+    serializer.is_valid(raise_exception=True)
+    serializer.save(organization_id=org_id, recipient_id=user_id, **kwargs)
     return serializer.data

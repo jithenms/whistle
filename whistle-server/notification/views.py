@@ -1,3 +1,4 @@
+import uuid
 from django.http import JsonResponse
 from rest_framework import mixins, status
 from rest_framework.generics import CreateAPIView
@@ -5,18 +6,18 @@ from rest_framework.permissions import AllowAny
 from rest_framework.viewsets import GenericViewSet
 
 from external_user.models import ExternalUser
-from notification.models import Notification
-from notification.serializers import NotificationSerializer
-from notification.tasks import send_notification
+from notification.models import Notification, BatchNotification
+from notification.serializers import NotificationSerializer, BatchNotificationSerializer
 from whistle_server.middleware import (
     ClientAuthentication,
     ServerAuthentication,
     IsValidExternalId,
 )
 
+from .tasks import send_batch_notification
+
 
 class NotificationViewSet(
-    CreateAPIView,
     mixins.ListModelMixin,
     mixins.UpdateModelMixin,
     mixins.RetrieveModelMixin,
@@ -52,14 +53,37 @@ class NotificationViewSet(
             return [IsValidExternalId()]
         return [AllowAny()]
 
+
+class BatchNotificationViewSet(
+    CreateAPIView,
+    mixins.ListModelMixin,
+    mixins.RetrieveModelMixin,
+    GenericViewSet,
+):
+    queryset = BatchNotification.objects.all()
+    serializer_class = BatchNotificationSerializer
+    authentication_classes = [ServerAuthentication]
+
     def create(self, request, *args, **kwargs):
-        external_id = request.data["external_id"]
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        send_notification.delay(external_id, request.user.id, serializer.data)
+        batch_id = uuid.uuid4()
+        send_batch_notification.delay(
+            batch_id,
+            self.request.user.id,
+            {
+                "recipients": request.data["recipients"],
+                "channels": request.data["channels"],
+                **serializer.data,
+            },
+        )
         return JsonResponse(
             {
+                "id": batch_id,
+                "recipients": request.data["recipients"],
+                **serializer.data,
+                "channels": request.data["channels"],
                 "status": "queued",
             },
-            status=status.HTTP_202_ACCEPTED,
+            status=status.HTTP_200_OK,
         )

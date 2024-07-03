@@ -5,8 +5,6 @@ from django.db import models
 from external_user.models import ExternalUser
 from organization.models import Organization
 
-status = ("delivered", "delivered", "failed", "failed")
-
 
 class Notification(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -22,3 +20,17 @@ class Notification(models.Model):
     seen_at = models.DateTimeField(null=True, blank=True)
     read_at = models.DateTimeField(null=True, blank=True)
     archived_at = models.DateTimeField(null=True, blank=True)
+
+
+class BatchNotification(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
+    recipients = models.ManyToManyField(
+        "external_user.ExternalUser", related_name="batch_notifications"
+    )
+    category = models.SlugField(null=True, blank=True)
+    topic = models.CharField(max_length=255, null=True, blank=True)
+    title = models.CharField(max_length=255)
+    content = models.CharField(max_length=255)
+    status = models.CharField(max_length=255)
+    sent_at = models.DateTimeField(null=True, blank=True)

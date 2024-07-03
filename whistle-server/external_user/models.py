@@ -17,6 +17,7 @@ class ExternalUser(models.Model):
 
 class ExternalUserPreference(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE)
     user = models.ForeignKey(ExternalUser, on_delete=models.CASCADE)
     slug = models.SlugField()
 
@@ -35,6 +36,7 @@ class ExternalUserPreferenceChannel(models.Model):
 
 class ExternalUserSubscription(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE)
     user = models.ForeignKey(ExternalUser, on_delete=models.CASCADE)
     topic = models.CharField(max_length=255)
 

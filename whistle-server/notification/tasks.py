@@ -1,4 +1,4 @@
-from datetime import datetime
+import datetime
 
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
@@ -14,38 +14,33 @@ from external_user.models import (
 )
 from whistle_server.celery import app
 
-# todo store error info and delivery data in db
+# todo improve error info and delivery data in db
 
 
 @app.task
 def send_batch_notification(batch_id, org_id, data):
-    recipient_external_ids = set(
-        recipient["external_id"] for recipient in data["recipients"]
-    )
+    delivered_to = set()
 
     if "category" in data and not "topic" in data:
-        for rec in data["recipients"]:
-            recipient = ExternalUser.objects.filter(
-                organization_id=org_id, external_id=rec["external_id"]
-            )
-
-            if not recipient:
-                continue
+        for recipient in data["recipients"]:
+            recipient_entity = get_or_create_external_user(org_id, recipient)
 
             preference = ExternalUserPreference.objects.prefetch_related(
                 "channels"
-            ).filter(user_id=recipient.first().id, slug=data["category"])
+            ).filter(user_id=recipient_entity.id, slug=data["category"])
 
             if not preference:
-                route_basic_notification(batch_id, org_id, recipient.first().id, data)
+                route_basic_notification(batch_id, org_id, recipient_entity, data)
             else:
                 route_notification_with_preference(
                     batch_id,
                     org_id,
-                    recipient.first().id,
+                    recipient_entity,
                     preference.first().channels.all(),
                     data,
                 )
+
+            delivered_to.add(recipient_entity.id)
 
     elif "topic" in data:
         subscribers = ExternalUserSubscription.objects.filter(
@@ -53,32 +48,26 @@ def send_batch_notification(batch_id, org_id, data):
         )
 
         if "category" in data:
-            for rec in data["recipients"]:
-                recipient = ExternalUser.objects.filter(
-                    organization_id=org_id, external_id=rec["external_id"]
-                )
-
-                if not recipient:
-                    continue
+            for recipient in data["recipients"]:
+                recipient_entity = get_or_create_external_user(org_id, recipient)
 
                 preference = ExternalUserPreference.objects.prefetch_related(
                     "channels"
-                ).filter(user_id=recipient.first().id, slug=data["category"])
+                ).filter(user_id=recipient_entity.id, slug=data["category"])
 
                 if not preference:
-                    route_basic_notification(
-                        batch_id, org_id, recipient.first().id, data
-                    )
+                    route_basic_notification(batch_id, org_id, recipient_entity, data)
                 else:
                     route_notification_with_preference(
                         batch_id,
                         org_id,
-                        recipient.first().id,
+                        recipient_entity,
                         preference.first().channels.all(),
                         data,
                     )
+                delivered_to.add(recipient_entity.id)
             for subscriber in subscribers:
-                if subscriber.user.external_id in recipient_external_ids:
+                if subscriber.user.id in delivered_to:
                     continue
 
                 subscriber_category = subscriber.categories.filter(
@@ -92,58 +81,42 @@ def send_batch_notification(batch_id, org_id, data):
                 if subscriber_category:
                     if not preference and subscriber_category.first().enabled:
                         route_basic_notification(
-                            batch_id, org_id, subscriber.user.id, data
+                            batch_id, org_id, subscriber.user, data
                         )
+                        delivered_to.add(subscriber.user.id)
                     elif preference and subscriber_category.first().enabled:
                         route_notification_with_preference(
                             batch_id,
                             org_id,
-                            subscriber.user.id,
+                            subscriber.user,
                             preference.first().channels.all(),
                             data,
                         )
+                        delivered_to.add(subscriber.user.id)
         else:
-            for rec in data["recipients"]:
-                recipient = ExternalUser.objects.filter(
-                    organization_id=org_id, external_id=rec["external_id"]
-                )
+            for recipient in data["recipients"]:
+                recipient_entity = get_or_create_external_user(org_id, recipient)
 
-                if not recipient:
-                    continue
+                route_basic_notification(batch_id, org_id, recipient_entity, data)
 
-                route_basic_notification(batch_id, org_id, recipient.first().id, data)
+                delivered_to.add(recipient_entity.id)
             for subscriber in subscribers:
-                if subscriber.user.external_id in recipient_external_ids:
+                if subscriber.user.external_id in delivered_to:
                     continue
-                route_basic_notification(batch_id, org_id, subscriber.user.id, data)
+                route_basic_notification(batch_id, org_id, subscriber.user, data)
     else:
-        for rec in data["recipients"]:
-            recipient = ExternalUser.objects.filter(
-                organization_id=org_id, external_id=rec["external_id"]
-            )
+        for recipient in data["recipients"]:
+            recipient_entity = get_or_create_external_user(org_id, recipient)
 
-            if not recipient:
-                continue
+            route_basic_notification(batch_id, org_id, recipient_entity, data)
 
-            route_basic_notification(batch_id, org_id, recipient.first().id, data)
-
-    persist_batch_notification(batch_id, org_id, data, status="processed")
-
-
-def route_notification_with_preference(batch_id, org_id, user_id, channels, data):
-    web_preference_entity = channels.get(slug="web")
-    if web_preference_entity.enabled:
-        send_web.delay(batch_id, org_id, user_id, data)
-    if "channels" in data:
-        if "sms" in data["channels"]:
-            sms_preference_entity = channels.get(slug="sms")
-            if sms_preference_entity.enabled:
-                send_sms.delay(batch_id, org_id, user_id, data)
-
-        if "email" in data["channels"]:
-            email_preference_entity = channels.get(slug="email")
-            if email_preference_entity.enabled:
-                send_email.delay(batch_id, org_id, user_id, data)
+    persist_batch_notification(
+        batch_id,
+        org_id,
+        data,
+        status="processed",
+        sent_at=datetime.datetime.now(datetime.timezone.utc),
+    )
 
 
 @app.task
@@ -214,7 +187,11 @@ def send_web(batch_id, org_id, user_id, data):
             },
         )
         data = persist_notification(
-            org_id, user.id, data, status="delivered", sent_at=datetime.now()
+            org_id,
+            user.id,
+            data,
+            status="delivered",
+            sent_at=datetime.datetime.now(datetime.timezone.utc),
         )
         print(f"web push record: {data}")
     except ExternalUser.DoesNotExist as error:
@@ -222,15 +199,44 @@ def send_web(batch_id, org_id, user_id, data):
         return
 
 
-def route_basic_notification(batch_id, org_id, user_id, data):
-    print(data)
-    send_web.delay(batch_id, org_id, user_id, data)
+def get_or_create_external_user(org_id, recipient):
+    lookup_field = "external_id" if "external_id" in recipient else "email"
+    recipient_entity, created = ExternalUser.objects.get_or_create(
+        **{"organization_id": org_id, lookup_field: recipient[lookup_field]},
+        defaults={
+            "first_name": recipient.get("first_name"),
+            "last_name": recipient.get("last_name"),
+            "email": recipient.get("email"),
+            "phone": recipient.get("phone"),
+        },
+    )
+    return recipient_entity
+
+
+def route_notification_with_preference(batch_id, org_id, recipient, channels, data):
+    web_preference_entity = channels.get(slug="web")
+    if web_preference_entity.enabled:
+        send_web.delay(batch_id, org_id, recipient.id, data)
     if "channels" in data:
-        if "sms" in data["channels"]:
-            send_sms.delay(batch_id, org_id, user_id, data)
+        if "sms" in data["channels"] and recipient.phone is not None:
+            sms_preference_entity = channels.get(slug="sms")
+            if sms_preference_entity.enabled:
+                send_sms.delay(batch_id, org_id, recipient.id, data)
 
         if "email" in data["channels"]:
-            send_email.delay(batch_id, org_id, user_id, data)
+            email_preference_entity = channels.get(slug="email")
+            if email_preference_entity.enabled:
+                send_email.delay(batch_id, org_id, recipient.id, data)
+
+
+def route_basic_notification(batch_id, org_id, recipient, data):
+    send_web.delay(batch_id, org_id, recipient.id, data)
+    if "channels" in data:
+        if "sms" in data["channels"] and recipient.phone is not None:
+            send_sms.delay(batch_id, org_id, recipient.id, data)
+
+        if "email" in data["channels"]:
+            send_email.delay(batch_id, org_id, recipient.id, data)
 
 
 def persist_batch_notification(batch_id, org_id, data, **kwargs):
@@ -241,7 +247,6 @@ def persist_batch_notification(batch_id, org_id, data, **kwargs):
 
 
 def persist_notification(org_id, user_id, data, **kwargs):
-    print(data)
     if "channels" in data:
         del data["channels"]
 

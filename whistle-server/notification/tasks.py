@@ -1,46 +1,57 @@
 import datetime
+import logging
 
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
+from django.db import DatabaseError
+from python_http_client import HTTPError
 from sendgrid import SendGridAPIClient, Email, To, Content, Mail
+from twilio.base.exceptions import TwilioRestException
 from twilio.rest import Client
 
 from connector.models import Twilio, Sendgrid
-from notification.serializers import NotificationSerializer, BatchNotificationSerializer
-from external_user.models import (
-    ExternalUserPreference,
-    ExternalUserSubscription,
-    ExternalUser,
+from external_user.models import ExternalUser
+from notification.serializers import (
+    NotificationSerializer,
+    BatchNotificationSerializer,
 )
+from preference.models import ExternalUserPreference
+from subscription.models import ExternalUserSubscription
 from whistle_server.celery import app
-
-# todo improve error info and delivery data in db
+from whistle_server.exceptions import NotificationException
 
 
 @app.task
 def send_batch_notification(batch_id, org_id, data):
-    delivered_to = set()
-
+    logging.info("Batch notification task started for batch: and org: ", batch_id, org_id)
+    delivered_to = []
     if "category" in data and not "topic" in data:
         for recipient in data["recipients"]:
-            recipient_entity = get_or_create_external_user(org_id, recipient)
+            try:
+                recipient_entity = update_or_create_external_user(
+                    batch_id, org_id, recipient, data
+                )
+            except NotificationException:
+                continue
 
             preference = ExternalUserPreference.objects.prefetch_related(
                 "channels"
             ).filter(user_id=recipient_entity.id, slug=data["category"])
 
-            if not preference:
-                route_basic_notification(batch_id, org_id, recipient_entity, data)
-            else:
-                route_notification_with_preference(
-                    batch_id,
-                    org_id,
-                    recipient_entity,
-                    preference.first().channels.all(),
-                    data,
-                )
-
-            delivered_to.add(recipient_entity.id)
+            try:
+                if not preference:
+                    route_basic_notification(batch_id, org_id, recipient_entity, data)
+                else:
+                    route_notification_with_preference(
+                        batch_id,
+                        org_id,
+                        recipient_entity,
+                        preference.first().channels.all(),
+                        data,
+                    )
+            except NotificationException:
+                continue
+            delivered_to.append(recipient_entity.id)
 
     elif "topic" in data:
         subscribers = ExternalUserSubscription.objects.filter(
@@ -49,7 +60,9 @@ def send_batch_notification(batch_id, org_id, data):
 
         if "category" in data:
             for recipient in data["recipients"]:
-                recipient_entity = get_or_create_external_user(org_id, recipient)
+                recipient_entity = update_or_create_external_user(
+                    batch_id, org_id, recipient, data
+                )
 
                 preference = ExternalUserPreference.objects.prefetch_related(
                     "channels"
@@ -65,7 +78,7 @@ def send_batch_notification(batch_id, org_id, data):
                         preference.first().channels.all(),
                         data,
                     )
-                delivered_to.add(recipient_entity.id)
+                delivered_to.append(recipient_entity.id)
             for subscriber in subscribers:
                 if subscriber.user.id in delivered_to:
                     continue
@@ -83,7 +96,7 @@ def send_batch_notification(batch_id, org_id, data):
                         route_basic_notification(
                             batch_id, org_id, subscriber.user, data
                         )
-                        delivered_to.add(subscriber.user.id)
+                        delivered_to.append(subscriber.user.id)
                     elif preference and subscriber_category.first().enabled:
                         route_notification_with_preference(
                             batch_id,
@@ -92,34 +105,39 @@ def send_batch_notification(batch_id, org_id, data):
                             preference.first().channels.all(),
                             data,
                         )
-                        delivered_to.add(subscriber.user.id)
+                        delivered_to.append(subscriber.user.id)
         else:
             for recipient in data["recipients"]:
-                recipient_entity = get_or_create_external_user(org_id, recipient)
+                recipient_entity = update_or_create_external_user(
+                    batch_id, org_id, recipient, data
+                )
 
                 route_basic_notification(batch_id, org_id, recipient_entity, data)
 
-                delivered_to.add(recipient_entity.id)
+                delivered_to.append(recipient_entity.id)
             for subscriber in subscribers:
                 if subscriber.user.external_id in delivered_to:
                     continue
                 route_basic_notification(batch_id, org_id, subscriber.user, data)
     else:
         for recipient in data["recipients"]:
-            recipient_entity = get_or_create_external_user(org_id, recipient)
+            recipient_entity = update_or_create_external_user(
+                batch_id, org_id, recipient, data
+            )
 
             route_basic_notification(batch_id, org_id, recipient_entity, data)
 
-    persist_batch_notification(
+    persist_batch_notification.delay(
         batch_id,
         org_id,
         data,
+        delivered_to,
         status="processed",
         sent_at=datetime.datetime.now(datetime.timezone.utc),
     )
 
 
-@app.task
+@app.task(throws=(NotificationException,))
 def send_sms(batch_id, org_id, user_id, data):
     try:
         user = ExternalUser.objects.get(id=user_id)
@@ -136,14 +154,34 @@ def send_sms(batch_id, org_id, user_id, data):
         )
 
         print(f"twilio sms status: {message.status}")
-    except (
-        Twilio.DoesNotExist,
-        ExternalUser.DoesNotExist,
-    ) as error:
-        print(error)
+    except TwilioRestException as error:
+        logging.error(
+            "Twilio failed to send text to user: %s for batch: %s with message: ",
+            user_id,
+            batch_id,
+            error.msg,
+        )
+    except Twilio.DoesNotExist:
+        logging.error(
+            "Twilio account not connected for org: %s for batch: %s", org_id, batch_id
+        )
+        raise NotificationException(
+            "Twilio account not connected", "twilio_account_not_connected"
+        )
+    except ExternalUser.DoesNotExist:
+        logging.error(
+            "Recipient not found by id: %s for org: %s and batch: %s",
+            user_id,
+            org_id,
+            batch_id,
+        )
+        raise NotificationException(
+            "Recipient not found by id",
+            "recipient_not_found",
+        )
 
 
-@app.task
+@app.task(throws=(NotificationException,))
 def send_email(batch_id, org_id, user_id, data):
     try:
         user = ExternalUser.objects.get(id=user_id)
@@ -156,21 +194,39 @@ def send_email(batch_id, org_id, user_id, data):
         content = Content("text/plain", data["channels"]["email"]["content"])
         mail = Mail(from_email, to_email, subject, content)
         response = sg.client.mail.send.post(request_body=mail.get())
-        print(
-            f"sendgrid email status: {response.status_code}, {response.body}, {response.headers}"
+        logging.info(
+            "Sendgrid email sent to user: %s with batch: %s", user_id, batch_id
         )
-    except (
-        Sendgrid.DoesNotExist,
-        ExternalUser.DoesNotExist,
-    ) as error:
-        print(error)
-        return
+    except HTTPError as error:
+        logging.error(
+            "Sendgrid failed to send email to user: %s for batch: %s with reason: ",
+            user_id,
+            batch_id,
+            error.reason,
+        )
+    except Sendgrid.DoesNotExist:
+        logging.error(
+            "Sendgrid account not connected for org: %s for batch: %s", org_id, batch_id
+        )
+        raise NotificationException(
+            "Sendgrid account not connected", "sendgrid_account_not_connected"
+        )
+    except ExternalUser.DoesNotExist:
+        logging.error(
+            "Recipient not found by id: %s for org: %s and batch: %s",
+            user_id,
+            org_id,
+            batch_id,
+        )
+        raise NotificationException(
+            "Recipient not found by id",
+            "recipient_not_found",
+        )
 
 
-@app.task
+@app.task(throws=(NotificationException,))
 def send_web(batch_id, org_id, user_id, data):
     try:
-        user = ExternalUser.objects.get(pk=user_id)
         channel_layer = get_channel_layer()
         async_to_sync(channel_layer.group_send)(
             f"user_{user_id}",
@@ -186,74 +242,213 @@ def send_web(batch_id, org_id, user_id, data):
                 },
             },
         )
-        data = persist_notification(
+    except ExternalUser.DoesNotExist:
+        logging.error(
+            "Recipient not found by id: %s for org: %s and batch: %s",
+            user_id,
             org_id,
-            user.id,
-            data,
-            status="delivered",
-            sent_at=datetime.datetime.now(datetime.timezone.utc),
+            batch_id,
         )
-        print(f"web push record: {data}")
-    except ExternalUser.DoesNotExist as error:
-        print(error)
-        return
+        raise NotificationException(
+            "Recipient not found by id",
+            "recipient_not_found",
+        )
 
 
-def get_or_create_external_user(org_id, recipient):
-    lookup_field = "external_id" if "external_id" in recipient else "email"
-    recipient_entity, created = ExternalUser.objects.get_or_create(
-        **{"organization_id": org_id, lookup_field: recipient[lookup_field]},
-        defaults={
-            "first_name": recipient.get("first_name"),
-            "last_name": recipient.get("last_name"),
-            "email": recipient.get("email"),
-            "phone": recipient.get("phone"),
-        },
-    )
-    return recipient_entity
+@app.task
+def persist_batch_notification(batch_id, org_id, data, delivered_to, **kwargs):
+    try:
+        serializer = BatchNotificationSerializer(context={"org_id": org_id, "delivered_to": delivered_to},
+                                                 data={**data, "id": batch_id, **kwargs})
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        logging.info(
+            "Batch notification record with id: %s persisted for org: %s",
+            batch_id,
+            org_id,
+        )
+    except DatabaseError as error:
+        logging.error(
+            "Failed to save batch notification record to database for org: %s "
+            "for batch: %s with database error: %s",
+            org_id,
+            batch_id,
+            error,
+        )
+
+
+@app.task
+def persist_notification(request, batch_id, org_id, user_id, data, **kwargs):
+    logging.debug(request)
+    try:
+        serializer = NotificationSerializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save(organization_id=org_id, recipient_id=user_id, **kwargs)
+        logging.info(
+            "Notification record persisted for user: %s and org: %s for batch: %s",
+            user_id,
+            org_id,
+            batch_id,
+        )
+    except DatabaseError as error:
+        logging.error(
+            "Failed to save notification record to database for user: %s "
+            "and org: %s for batch: %s with database error: %s",
+            user_id,
+            org_id,
+            batch_id,
+            error,
+        )
+
+
+def update_or_create_external_user(batch_id, org_id, recipient, data):
+    if "external_id" in recipient:
+        recipient_entity, created = ExternalUser.objects.update_or_create(
+            organization_id=org_id,
+            external_id=recipient["external_id"],
+            defaults={
+                "first_name": recipient.get("first_name", None),
+                "last_name": recipient.get("last_name", None),
+                "email": recipient.get("email", None),
+                "phone": recipient.get("phone", None),
+            },
+        )
+
+        if created and "channels" in data:
+            if "email" in data["channels"] and "email" not in recipient:
+                logging.error(
+                    "Email included in channels but email not provided for new user for org: %s and batch: %s",
+                    org_id,
+                    batch_id,
+                )
+                raise NotificationException(
+                    "Email included in channels but email not provided for new user",
+                    "no_email_provided_for_new_user",
+                )
+            if "sms" in data["channels"] and "phone" not in recipient:
+                logging.error(
+                    "SMS included in channels but phone not provided for new user for org: %s and batch: %s",
+                    org_id,
+                    batch_id,
+                )
+                raise NotificationException(
+                    "SMS included in channels but phone not provided for new user",
+                    "no_phone_provided_for_new_user",
+                )
+
+        return recipient_entity
+
+    elif "email" in recipient:
+        try:
+            return ExternalUser.objects.get(
+                organization_id=org_id, email=recipient["email"]
+            )
+        except ExternalUser.DoesNotExist:
+            logging.error(
+                "Recipient not found by email for org: %s and batch: %s",
+                org_id,
+                batch_id,
+            )
+            raise NotificationException(
+                "Recipient not found by email",
+                "recipient_not_found",
+            )
+    else:
+        logging.error(
+            "Identifier for recipient not provided for org: %s and batch: %s",
+            org_id,
+            batch_id,
+        )
+        raise NotificationException(
+            "Identifier for recipient not provided",
+            "recipient_identifier_not_provided",
+        )
 
 
 def route_notification_with_preference(batch_id, org_id, recipient, channels, data):
+    logging.info(
+        "Routing notification with preference for user: %s in org: %s for batch: %s",
+        recipient.id,
+        org_id,
+        batch_id,
+    )
     web_preference_entity = channels.get(slug="web")
     if web_preference_entity.enabled:
-        send_web.delay(batch_id, org_id, recipient.id, data)
+        send_web.apply_async((batch_id, org_id, recipient.id, data), link=persist_notification.s(
+            batch_id,
+            org_id,
+            recipient.id,
+            data,
+            status="delivered",
+            sent_at=datetime.datetime.now(datetime.timezone.utc),
+        ))
+    else:
+        logging.info(
+            "Web push disabled for category %s for user: %s in org: %s for batch: %s",
+            data.get("category", None),
+            recipient.id,
+            org_id,
+            batch_id,
+        )
     if "channels" in data:
         if "sms" in data["channels"] and recipient.phone is not None:
             sms_preference_entity = channels.get(slug="sms")
             if sms_preference_entity.enabled:
                 send_sms.delay(batch_id, org_id, recipient.id, data)
+            else:
+                logging.info(
+                    "SMS disabled for category %s for user: %s in org: %s for batch: %s",
+                    data.get("category", None),
+                    recipient.id,
+                    org_id,
+                    batch_id,
+                )
 
         if "email" in data["channels"]:
             email_preference_entity = channels.get(slug="email")
             if email_preference_entity.enabled:
                 send_email.delay(batch_id, org_id, recipient.id, data)
+            else:
+                logging.info(
+                    "Email disabled for category %s for user: %s in org: %s for batch: %s",
+                    data.get("category", None),
+                    recipient.id,
+                    org_id,
+                    batch_id,
+                )
 
 
 def route_basic_notification(batch_id, org_id, recipient, data):
-    send_web.delay(batch_id, org_id, recipient.id, data)
+    logging.info(
+        "Routing basic notification for user: %s in org: %s for batch: %s",
+        recipient.id,
+        org_id,
+        batch_id,
+    )
+    send_web.apply_async((batch_id, org_id, recipient.id, data), link=persist_notification.s(
+        batch_id,
+        org_id,
+        recipient.id,
+        data,
+        status="delivered",
+        sent_at=datetime.datetime.now(datetime.timezone.utc),
+    ), link_error=persist_notification.s(
+        batch_id,
+        org_id,
+        recipient.id,
+        data,
+        status="failed",
+        sent_at=datetime.datetime.now(datetime.timezone.utc),
+    ))
     if "channels" in data:
         if "sms" in data["channels"] and recipient.phone is not None:
             send_sms.delay(batch_id, org_id, recipient.id, data)
-
+        elif recipient.phone is None:
+            logging.warning(
+                "Trying to route SMS notification without phone on record for user: %s in org: %s for batch: %s",
+                recipient.id,
+                org_id,
+                batch_id,
+            )
         if "email" in data["channels"]:
             send_email.delay(batch_id, org_id, recipient.id, data)
-
-
-def persist_batch_notification(batch_id, org_id, data, **kwargs):
-    serializer = BatchNotificationSerializer(data=data)
-    serializer.is_valid(raise_exception=True)
-    serializer.save(id=batch_id, organization_id=org_id, **kwargs)
-    return serializer.data
-
-
-def persist_notification(org_id, user_id, data, **kwargs):
-    if "channels" in data:
-        del data["channels"]
-
-    if "recipients" in data:
-        del data["recipients"]
-
-    serializer = NotificationSerializer(data=data)
-    serializer.is_valid(raise_exception=True)
-    serializer.save(organization_id=org_id, recipient_id=user_id, **kwargs)
-    return serializer.data

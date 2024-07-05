@@ -26,7 +26,7 @@ class BatchNotification(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
     recipients = models.ManyToManyField(
-        "external_user.ExternalUser", related_name="batch_notifications"
+        ExternalUser, related_name="batch_notifications"
     )
     category = models.SlugField(null=True, blank=True)
     topic = models.CharField(max_length=255, null=True, blank=True)

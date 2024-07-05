@@ -1,4 +1,7 @@
+import logging
+
 from rest_framework import serializers
+from rest_framework.exceptions import ValidationError
 
 from external_user.models import ExternalUser
 from external_user.serializers import ExternalUserSerializer
@@ -48,7 +51,15 @@ class NotificationSerializer(serializers.ModelSerializer):
         read_only_fields = ("recipient", "sent_at", "status")
 
     def update(self, instance, validated_data):
-        for field in ["category", "topic", "title", "content", "action_link"]:
+        for field in [
+            "channels",
+            "external_id",
+            "category",
+            "topic",
+            "title",
+            "content",
+            "action_link",
+        ]:
             if field in validated_data:
                 validated_data.pop(field)
         return super().update(instance, validated_data)
@@ -73,17 +84,30 @@ class BatchNotificationSerializer(serializers.ModelSerializer):
         read_only_fields = ("status",)
 
     def create(self, validated_data):
-        recipients = validated_data["recipients"]
-        del validated_data["recipients"]
-        del validated_data["channels"]
+        logging.info(validated_data)
+        delivered_to = self.context["delivered_to"]
+        validated_data.pop("recipients")
+        validated_data.pop("channels")
 
-        batch_notification = BatchNotification(**validated_data)
+        batch_notification = BatchNotification(
+            **validated_data, organization_id=self.context["org_id"]
+        )
         batch_notification.save()
 
-        for recipient in recipients:
-            lookup_field = "external_id" if "external_id" in recipient else "email"
-            batch_notification.recipients.add(
-                ExternalUser.objects.get(**{lookup_field: recipient[lookup_field]})
-            )
+        for recipient_id in delivered_to:
+            try:
+                external_user = ExternalUser.objects.get(pk=recipient_id)
+                batch_notification.recipients.add(external_user)
+            except ExternalUser.DoesNotExist:
+                logging.error(
+                    "External user: %s in delivered to set for notification batch: %s does not exist in db",
+                    recipient_id,
+                    validated_data["id"],
+                )
+                raise ValidationError(
+                    f"External user: {recipient_id} in delivered to set for notification batch: {validated_data['id']}"
+                    f" does not exist in db",
+                    "external_user_not_found",
+                )
 
         return batch_notification

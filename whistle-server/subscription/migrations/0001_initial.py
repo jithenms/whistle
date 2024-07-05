@@ -10,12 +10,13 @@ class Migration(migrations.Migration):
     initial = True
 
     dependencies = [
+        ("external_user", "0001_initial"),
         ("organization", "0001_initial"),
     ]
 
     operations = [
         migrations.CreateModel(
-            name="Sendgrid",
+            name="ExternalUserSubscription",
             fields=[
                 (
                     "id",
@@ -26,19 +27,25 @@ class Migration(migrations.Migration):
                         serialize=False,
                     ),
                 ),
-                ("from_email", models.CharField(max_length=255, unique=True)),
-                ("api_key", models.CharField(max_length=255, unique=True)),
+                ("topic", models.CharField(max_length=255)),
                 (
                     "organization",
                     models.ForeignKey(
                         on_delete=django.db.models.deletion.CASCADE,
                         to="organization.organization",
+                    ),
+                ),
+                (
+                    "user",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        to="external_user.externaluser",
                     ),
                 ),
             ],
         ),
         migrations.CreateModel(
-            name="Twilio",
+            name="ExternalUserSubscriptionCategory",
             fields=[
                 (
                     "id",
@@ -49,14 +56,18 @@ class Migration(migrations.Migration):
                         serialize=False,
                     ),
                 ),
-                ("from_phone", models.CharField(max_length=255, unique=True)),
-                ("account_sid", models.CharField(max_length=255, unique=True)),
-                ("auth_token", models.CharField(max_length=255, unique=True)),
+                ("slug", models.SlugField()),
                 (
-                    "organization",
+                    "description",
+                    models.CharField(blank=True, max_length=255, null=True),
+                ),
+                ("enabled", models.BooleanField(default=True)),
+                (
+                    "user_subscription",
                     models.ForeignKey(
                         on_delete=django.db.models.deletion.CASCADE,
-                        to="organization.organization",
+                        related_name="categories",
+                        to="subscription.externalusersubscription",
                     ),
                 ),
             ],

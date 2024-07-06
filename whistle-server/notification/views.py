@@ -76,11 +76,29 @@ class BatchNotificationViewSet(
     authentication_classes = [ServerAuth]
 
     def create(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
         batch_id = uuid.uuid4()
-        send_batch_notification.delay(batch_id, self.request.user.id, serializer.data)
+        serializer = self.get_serializer(data={'id': batch_id, **request.data})
+        serializer.is_valid(raise_exception=True)
+        instance = serializer.save(status="queued")
+        try:
+            send_batch_notification.delay(batch_id, self.request.user.id, serializer.validated_data)
+            logging.info(
+                "Batch notification queued with id: %s for org: %s",
+                batch_id,
+                self.request.user.id,
+            )
+        except:
+            instance.status = "failed"
+            instance.save()
+            logging.info(
+                "Batch notification failed to queue with id: %s for org: %s",
+                batch_id,
+                self.request.user.id,
+            )
+        response_data = serializer.validated_data
+        if "channels" in response_data:
+            response_data.pop("channels")
         return JsonResponse(
-            {"id": batch_id, **serializer.data},
+            {**response_data, 'status': instance.status},
             status=status.HTTP_200_OK,
         )

@@ -1,9 +1,5 @@
-import logging
-
 from rest_framework import serializers
-from rest_framework.exceptions import ValidationError
 
-from external_user.models import ExternalUser
 from external_user.serializers import ExternalUserSerializer
 from notification.models import (
     Notification,
@@ -66,6 +62,7 @@ class NotificationSerializer(serializers.ModelSerializer):
 
 
 class BatchNotificationSerializer(serializers.ModelSerializer):
+    id = serializers.UUIDField()
     recipients = ExternalUserSerializer(many=True)
     channels = NotificationChannelsSerializer(required=False)
 
@@ -83,33 +80,12 @@ class BatchNotificationSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ("status",)
 
-    def create(self, validated_data):
-        delivered_to = self.context["delivered_to"]
+    def create(self, validated_data, **kwargs):
+        org = self.context["request"].user
+        validated_data["organization"] = org
         validated_data.pop("recipients")
         if "channels" in validated_data:
             validated_data.pop("channels")
-
-        batch_notification = BatchNotification(
-            id=self.context["id"],
-            organization_id=self.context["org_id"],
-            **validated_data,
-        )
-        batch_notification.save()
-
-        for recipient_id in delivered_to:
-            try:
-                external_user = ExternalUser.objects.get(pk=recipient_id)
-                batch_notification.recipients.add(external_user)
-            except ExternalUser.DoesNotExist:
-                logging.error(
-                    "External user: %s in delivered to set for notification batch: %s does not exist in db",
-                    recipient_id,
-                    validated_data["id"],
-                )
-                raise ValidationError(
-                    f"External user: {recipient_id} in delivered to set for notification batch: {validated_data['id']}"
-                    f" does not exist in db",
-                    "external_user_not_found",
-                )
-
-        return batch_notification
+        instance = BatchNotification(**validated_data, **kwargs)
+        instance.save()
+        return instance

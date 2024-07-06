@@ -13,7 +13,6 @@ from twilio.rest import Client
 from connector.models import Twilio, Sendgrid
 from external_user.models import ExternalUser
 from notification.models import Notification, BatchNotification
-from notification.serializers import BatchNotificationSerializer
 from preference.models import ExternalUserPreference
 from subscription.models import ExternalUserSubscription
 from whistle_server.celery import app
@@ -26,14 +25,14 @@ def send_batch_notification(batch_id, org_id, data):
     recipient_ids = set()
 
     for recipient in data["recipients"]:
-        recipient_entity = update_or_create_external_user(
-            batch_id, org_id, recipient, data
-        )
-
-        tasks.append(handle_input_recipient.s(batch_id, org_id, recipient_entity.id, data))
-
-        recipient_ids.add(recipient_entity.id)
-
+        try:
+            recipient_entity = update_or_create_external_user(
+                batch_id, org_id, recipient, data
+            )
+            tasks.append(handle_recipient.s(batch_id, org_id, recipient_entity.id, data))
+            recipient_ids.add(recipient_entity.id)
+        except NotificationException:
+            continue
     if "topic" in data:
         subscribers = ExternalUserSubscription.objects.filter(organization_id=org_id, topic=data["topic"])
 
@@ -41,13 +40,13 @@ def send_batch_notification(batch_id, org_id, data):
             if subscriber.id not in recipient_ids:
                 tasks.append(handle_topic_subscriber.s(batch_id, org_id, subscriber, data))
 
-    result = chord(tasks)(batch_notification_callback.s(batch_id, org_id, data))
+    result = chord(tasks)(update_batch_notification.s(batch_id, org_id, data))
 
-    return result
+    return result.id
 
 
 @app.task
-def handle_input_recipient(batch_id, org_id, recipient_id, data):
+def handle_recipient(batch_id, org_id, recipient_id, data):
     try:
         recipient = ExternalUser.objects.get(pk=recipient_id)
 
@@ -72,7 +71,7 @@ def handle_input_recipient(batch_id, org_id, recipient_id, data):
             route_basic_notification(batch_id, org_id, recipient, data)
             return recipient.id
     except NotificationException:
-        return None
+        return
 
 
 @app.task
@@ -105,7 +104,7 @@ def handle_topic_subscriber(batch_id, org_id, subscriber_id, data):
             route_basic_notification(batch_id, org_id, subscriber.user, data)
             return subscriber.id
     except NotificationException:
-        return None
+        return
 
 
 @app.task(throws=(NotificationException,))
@@ -124,7 +123,9 @@ def send_sms(batch_id, org_id, user_id, data):
             body=data["channels"]["sms"]["body"],
         )
 
-        print(f"twilio sms status: {message.status}")
+        logging.info("twilio sms status: %s", message.status)
+
+        return message
     except TwilioRestException as error:
         logging.error(
             "Twilio failed to send text to user: %s for batch: %s with message: ",
@@ -168,6 +169,7 @@ def send_email(batch_id, org_id, user_id, data):
         logging.info(
             "Sendgrid email sent to user: %s with batch: %s", user_id, batch_id
         )
+        return response
     except HTTPError as error:
         logging.error(
             "Sendgrid failed to send email to user: %s for batch: %s with reason: ",
@@ -213,6 +215,7 @@ def send_web(batch_id, org_id, user_id, data):
                 },
             },
         )
+        return
     except ExternalUser.DoesNotExist:
         logging.error(
             "Recipient not found by id: %s for org: %s and batch: %s",
@@ -226,9 +229,8 @@ def send_web(batch_id, org_id, user_id, data):
         )
 
 
-@app.task
+@app.task(throws=(DatabaseError,))
 def persist_notification(web_response, batch_id, org_id, user_id, data, **kwargs):
-    logging.info(web_response)
     data.pop("channels")
     data.pop('recipients')
     try:
@@ -237,6 +239,7 @@ def persist_notification(web_response, batch_id, org_id, user_id, data, **kwargs
                                                    title=data.get('title', ""),
                                                    content=data.get('content', ""),
                                                    action_link=data.get('action_link', ""), **kwargs)
+
         logging.info(
             "Notification record with id: %s persisted for user: %s and org: %s for batch: %s",
             notification.id,
@@ -244,7 +247,6 @@ def persist_notification(web_response, batch_id, org_id, user_id, data, **kwargs
             org_id,
             batch_id,
         )
-        return
     except DatabaseError as error:
         logging.error(
             "Failed to save notification record to database for user: %s "
@@ -255,30 +257,45 @@ def persist_notification(web_response, batch_id, org_id, user_id, data, **kwargs
             error,
         )
         raise
-
-
-@app.task(throws=(DatabaseError,))
-def batch_notification_callback(results, batch_id, org_id, data):
-    logging.info(results)
-    delivered_to = [recipient_id for recipient_id in results if recipient_id]
     try:
-        serializer = BatchNotificationSerializer(
-            context={"id": batch_id, "org_id": org_id, "delivered_to": delivered_to},
-            data={**data, 'status': "processed",
-                  'sent_at': datetime.datetime.now(datetime.timezone.utc)})
-        serializer.is_valid(raise_exception=True)
-        serializer.save()
+        batch_notification = BatchNotification.objects.get(pk=batch_id)
+        external_user = ExternalUser.objects.get(pk=user_id)
+        batch_notification.recipients.add(external_user)
+
         logging.info(
-            "Batch notification record with id: %s persisted for org: %s",
+            "External user: %s added to batch: %s in org: %s",
+            user_id,
             batch_id,
             org_id,
         )
+
+        return notification.id
     except DatabaseError as error:
         logging.error(
-            "Failed to save batch notification record to database for org: %s "
-            "for batch: %s with database error: %s",
+            "Failed to add notification record to batch for user: %s "
+            "and org: %s for batch: %s with database error: %s",
+            user_id,
             org_id,
             batch_id,
+            error,
+        )
+        raise
+
+
+@app.task(throws=(DatabaseError,))
+def update_batch_notification(delivered_to, batch_id, org_id, data):
+    data.pop("channels")
+    data.pop("recipients")
+    try:
+        batch_notification = BatchNotification.objects.get(pk=batch_id)
+        batch_notification.status = "processed"
+        batch_notification.save()
+        return batch_id
+    except DatabaseError as error:
+        logging.error(
+            "Failed to update batch notification to processed for batch: %s in org: %s with database error: %s",
+            batch_id,
+            org_id,
             error,
         )
         raise
@@ -304,19 +321,11 @@ def update_or_create_external_user(batch_id, org_id, recipient, data):
                     org_id,
                     batch_id,
                 )
-                raise NotificationException(
-                    "Email included in channels but email not provided for new user",
-                    "no_email_provided_for_new_user",
-                )
             if "sms" in data["channels"] and "phone" not in recipient:
                 logging.error(
                     "SMS included in channels but phone not provided for new user for org: %s and batch: %s",
                     org_id,
                     batch_id,
-                )
-                raise NotificationException(
-                    "SMS included in channels but phone not provided for new user",
-                    "no_phone_provided_for_new_user",
                 )
 
         return recipient_entity

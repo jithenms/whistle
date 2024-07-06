@@ -1,9 +1,9 @@
 import hashlib
 import hmac
+import logging
 from urllib.parse import parse_qs
 
 from channels.db import database_sync_to_async
-
 from django.conf import settings
 from jwt import PyJWKClient
 from keycove import decrypt
@@ -46,6 +46,51 @@ class ClientAuthMiddleware:
                     if external_user:
                         scope["external_user"] = external_user
                         scope["org"] = org
+                    else:
+                        scope["error_code"] = "user_not_found"
+                        scope["error_reason"] = (
+                            "User with this External ID not found. Please verify the External ID and "
+                            "ensure the user is registered with Whistle."
+                        )
+                        logging.debug(
+                            "User not found with external id: %s for org: %s while trying to connect websocket",
+                            external_id,
+                            org.id,
+                        )
+                else:
+                    scope["error_reason"] = (
+                        "External ID HMAC invalid. Please ensure you are generating the HMAC correctly "
+                        "using your API Secret and try again."
+                    )
+                    scope["error_code"] = "invalid_external_id_hmac"
+                    logging.debug(
+                        "Invalid External Id HMAC provided while trying to connect websocket for org: %s",
+                        org.id,
+                    )
+            else:
+                scope["error_code"] = "invalid_api_key"
+                scope["error_reason"] = (
+                    "API key invalid. You can find your API key in Whistle settings."
+                )
+                logging.debug(
+                    "Invalid API Key provided while trying to connect websocket"
+                )
+        elif b"sec-websocket-protocol" not in headers:
+            scope["error_code"] = "missing_api_key"
+            scope["error_reason"] = (
+                "API key is missing. Please provide your API key in the request header."
+            )
+        elif b"external_id_hmac" not in headers:
+            scope["error_reason"] = (
+                "No External ID Hmac provided. Please ensure you are generating an Hmac "
+                "using your secret key and try again."
+            )
+            scope["error_code"] = "missing_external_id_hmac"
+        else:
+            scope["error_reason"] = (
+                "No External ID provided. Please include a valid External ID to identify the user."
+            )
+            scope["error_code"] = "missing_external_id"
         return await self.app(scope, receive, send)
 
 

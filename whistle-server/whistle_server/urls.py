@@ -20,29 +20,33 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 
 from connector.views import SendgridViewSet, TwilioViewSet
-from external_user.views import (
-    ExternalUserViewSet,
-    ExternalUserPreferenceViewSet,
-    ExternalUserSubscriptionViewSet,
-)
+from external_user.views import ExternalUserViewSet
 from notification.views import NotificationViewSet, BatchNotificationViewSet
 from organization.views import OrganizationViewSet
+from preference.views import ExternalUserPreferenceViewSet
+from subscription.views import ExternalUserSubscriptionViewSet
 
-router = DefaultRouter()
-router.register(r"organizations", OrganizationViewSet, basename="organization")
-router.register(r"users", ExternalUserViewSet, basename="external_user")
-router.register(r"preferences", ExternalUserPreferenceViewSet, basename="preference")
-router.register(
-    r"subscriptions", ExternalUserSubscriptionViewSet, basename="subscription"
+v1_router = DefaultRouter()
+v1_router.register(r"organizations", OrganizationViewSet, basename="organizations")
+v1_router.register(r"users", ExternalUserViewSet, basename="external_users")
+v1_router.register(
+    r"preferences", ExternalUserPreferenceViewSet, basename="preferences"
 )
-router.register(
-    r"notifications/batch", BatchNotificationViewSet, basename="notification_batch"
+v1_router.register(
+    r"subscriptions", ExternalUserSubscriptionViewSet, basename="subscriptions"
 )
-router.register(r"notifications", NotificationViewSet, basename="notification")
-router.register(r"connectors/twilio", TwilioViewSet, basename="connector.twilio")
-router.register(r"connectors/sendgrid", SendgridViewSet, basename="connector.sendgrid")
+v1_router.register(
+    r"notifications/batch",
+    BatchNotificationViewSet,
+    basename="notifications-batch",
+)
+v1_router.register(r"notifications", NotificationViewSet, basename="notifications")
+v1_router.register(r"connectors/twilio", TwilioViewSet, basename="connectors.twilio")
+v1_router.register(
+    r"connectors/sendgrid", SendgridViewSet, basename="connectors.sendgrid"
+)
 
 urlpatterns = [
     path("admin/", admin.site.urls),
-    path("api/v1/", include(router.urls)),
+    path("api/v1/", include(v1_router.urls)),
 ]

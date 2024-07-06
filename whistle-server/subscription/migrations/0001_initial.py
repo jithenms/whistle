@@ -10,12 +10,13 @@ class Migration(migrations.Migration):
     initial = True
 
     dependencies = [
-        ("user", "0001_initial"),
+        ("external_user", "0001_initial"),
+        ("organization", "0001_initial"),
     ]
 
     operations = [
         migrations.CreateModel(
-            name="Organization",
+            name="ExternalUserSubscription",
             fields=[
                 (
                     "id",
@@ -26,29 +27,7 @@ class Migration(migrations.Migration):
                         serialize=False,
                     ),
                 ),
-                ("clerk_org_id", models.CharField(max_length=255)),
-                ("name", models.CharField(max_length=255)),
-                ("slug", models.SlugField(unique=True)),
-                ("api_key_encrypt", models.CharField(max_length=255, unique=True)),
-                ("api_key_hash", models.CharField(max_length=255, unique=True)),
-                ("api_secret_encrypt", models.CharField(max_length=255, unique=True)),
-                ("api_secret_hash", models.CharField(max_length=255, unique=True)),
-                ("api_secret_salt", models.CharField(max_length=255, unique=True)),
-            ],
-        ),
-        migrations.CreateModel(
-            name="OrganizationMember",
-            fields=[
-                (
-                    "id",
-                    models.UUIDField(
-                        default=uuid.uuid4,
-                        editable=False,
-                        primary_key=True,
-                        serialize=False,
-                    ),
-                ),
-                ("role", models.CharField(max_length=255)),
+                ("topic", models.CharField(max_length=255)),
                 (
                     "organization",
                     models.ForeignKey(
@@ -59,7 +38,33 @@ class Migration(migrations.Migration):
                 (
                     "user",
                     models.ForeignKey(
-                        on_delete=django.db.models.deletion.PROTECT, to="user.user"
+                        on_delete=django.db.models.deletion.CASCADE,
+                        to="external_user.externaluser",
+                    ),
+                ),
+            ],
+        ),
+        migrations.CreateModel(
+            name="ExternalUserSubscriptionCategory",
+            fields=[
+                (
+                    "id",
+                    models.UUIDField(
+                        default=uuid.uuid4,
+                        editable=False,
+                        primary_key=True,
+                        serialize=False,
+                    ),
+                ),
+                ("slug", models.SlugField()),
+                ("description", models.CharField(blank=True, max_length=255)),
+                ("enabled", models.BooleanField(default=True)),
+                (
+                    "user_subscription",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="categories",
+                        to="subscription.externalusersubscription",
                     ),
                 ),
             ],

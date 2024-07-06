@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.0/ref/settings/
 """
 
+import logging
 import os
 from pathlib import Path
 
@@ -17,6 +18,7 @@ from dotenv import load_dotenv, find_dotenv
 
 load_dotenv(find_dotenv())
 
+logger = logging.getLogger(__name__)
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -38,6 +40,8 @@ INSTALLED_APPS = [
     "connector",
     "notification",
     "external_user",
+    "preference",
+    "subscription",
     "organization",
     "user",
     "realtime",
@@ -73,6 +77,7 @@ MIDDLEWARE = [
 
 REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": ("rest_framework.renderers.JSONRenderer",),
+    "EXCEPTION_HANDLER": "whistle_server.exceptions.custom_exception_handler",
 }
 
 ROOT_URLCONF = "whistle_server.urls"
@@ -93,10 +98,42 @@ TEMPLATES = [
     },
 ]
 
+LOGGING = {
+    # Use v1 of the logging config schema
+    'version': 1,
+    # Continue to use existing loggers
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '{levelname} {asctime} {module} {process:d} {thread:d} {message}',
+            'style': '{',
+        },
+    },
+    # Create a log handler that prints logs to the terminal
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
+        },
+    },
+    # Define the root logger's settings
+    'root': {
+        'handlers': ['console'],
+        'level': 'DEBUG',
+    },
+    # Define the django log module's settings
+    'loggers': {
+        'django': {
+            'handlers': ['console'],
+            'level': os.getenv('DJANGO_LOG_LEVEL', 'DEBUG'),
+            'propagate': False,
+        },
+    },
+}
+
 WSGI_APPLICATION = "whistle_server.wsgi.application"
 
 ASGI_APPLICATION = "whistle_server.asgi.application"
-
 
 # Database
 # https://docs.djangoproject.com/en/5.0/ref/settings/#databases

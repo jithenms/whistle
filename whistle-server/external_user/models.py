@@ -10,10 +10,10 @@ class ExternalUser(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE)
     external_id = models.CharField(max_length=255)
-    first_name = models.CharField(max_length=255, null=True, blank=True)
-    last_name = models.CharField(max_length=255, null=True, blank=True)
+    first_name = models.CharField(max_length=255, blank=True)
+    last_name = models.CharField(max_length=255, blank=True)
     email = models.CharField(max_length=255)
-    phone = models.CharField(max_length=255, null=True, blank=True)
+    phone = models.CharField(max_length=255, blank=True)
 
     class Meta:
         unique_together = [['organization', 'email'], ['organization', 'phone'], ['organization', 'external_id']]

@@ -84,13 +84,12 @@ class BatchNotificationSerializer(serializers.ModelSerializer):
         read_only_fields = ("status",)
 
     def create(self, validated_data):
-        logging.info(validated_data)
         delivered_to = self.context["delivered_to"]
         validated_data.pop("recipients")
         validated_data.pop("channels")
 
         batch_notification = BatchNotification(
-            **validated_data, organization_id=self.context["org_id"]
+            id=self.context['id'], organization_id=self.context["org_id"], **validated_data
         )
         batch_notification.save()
 

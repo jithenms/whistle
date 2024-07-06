@@ -13,6 +13,7 @@ class ExternalUserPreference(models.Model):
     user = models.ForeignKey(ExternalUser, on_delete=models.CASCADE)
     slug = models.SlugField()
 
+
 CHANNELS = (("web", "web"), ("email", "email"), ("sms", "sms"))
 
 

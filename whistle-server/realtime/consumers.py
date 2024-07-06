@@ -23,24 +23,31 @@ class NotificationConsumer(AsyncWebsocketConsumer):
                 external_user.id,
                 org.id,
             )
-        elif "error_code" in self.scope and "error_reason":
+        elif "error_code" in self.scope and "error_reason" in self.scope:
             await self.close(self.scope["error_code"], self.scope["error_reason"])
         else:
             await self.close()
 
     async def disconnect(self, close_code):
-        org = self.scope["org"]
-        external_user = self.scope["external_user"]
-        await self.channel_layer.group_discard(
-            f"user_{external_user.id}", self.channel_name
-        )
-        logging.debug(
-            "Channel: %s with user: %s and org: %s disconnected with close code: %s",
-            self.channel_name,
-            external_user.id,
-            org.id,
-            close_code,
-        )
+        if (
+                "org" in self.scope
+                and "external_user" in self.scope
+                and "api_key" in self.scope
+        ):
+            org = self.scope
+            external_user = self.scope["external_user"]
+            await self.channel_layer.group_discard(
+                f"user_{external_user.id}", self.channel_name
+            )
+            logging.debug(
+                "Channel: %s with user: %s and org: %s disconnected with close code: %s",
+                self.channel_name,
+                external_user.id,
+                org.id,
+                close_code,
+            )
+        else:
+            pass
 
     async def receive(self, text_data):
         org = self.scope["org"]

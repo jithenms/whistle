@@ -20,5 +20,5 @@ class ExternalUserSubscriptionCategory(models.Model):
         ExternalUserSubscription, related_name="categories", on_delete=models.CASCADE
     )
     slug = models.SlugField()
-    description = models.CharField(max_length=255, null=True, blank=True)
+    description = models.CharField(max_length=255, blank=True)
     enabled = models.BooleanField(default=True)

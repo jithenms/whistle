@@ -52,7 +52,7 @@ class ClientAuthMiddleware:
                             "User with this External ID not found. Please verify the External ID and "
                             "ensure the user is registered with Whistle."
                         )
-                        logging.error(
+                        logging.debug(
                             "User not found with external id: %s for org: %s while trying to connect websocket",
                             external_id,
                             org.id,
@@ -63,7 +63,7 @@ class ClientAuthMiddleware:
                         "using your API Secret and try again."
                     )
                     scope["error_code"] = "invalid_external_id_hmac"
-                    logging.error(
+                    logging.debug(
                         "Invalid External Id HMAC provided while trying to connect websocket for org: %s",
                         org.id,
                     )
@@ -72,9 +72,8 @@ class ClientAuthMiddleware:
                 scope["error_reason"] = (
                     "API key invalid. You can find your API key in Whistle settings."
                 )
-                logging.error(
-                    "Invalid API Key provided while trying to connect websocket for org: %s",
-                    org.id,
+                logging.debug(
+                    "Invalid API Key provided while trying to connect websocket"
                 )
         elif b"sec-websocket-protocol" not in headers:
             scope["error_code"] = "missing_api_key"

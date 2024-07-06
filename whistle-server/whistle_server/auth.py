@@ -77,7 +77,7 @@ class ServerAuth(BaseAuthentication):
                         (api_secret + org.api_secret_salt).encode()
                     ).hexdigest()
                     if api_secret_hash != org.api_secret_hash:
-                        logging.warning(
+                        logging.debug(
                             "API secret invalid for org: %s",
                             org.id,
                         )
@@ -139,7 +139,7 @@ class ClientAuth(BaseAuthentication):
                 org = Organization.objects.get(api_key_hash=api_key_hash)
                 return org, None
             except Organization.DoesNotExist:
-                logging.warning(
+                logging.debug(
                     "Invalid API Key provided"
                 )
                 raise AuthenticationFailed(
@@ -168,7 +168,7 @@ class IsValidExternalId(BasePermission):
                     "using your API Secret and try again."
                 )
                 self.code = "invalid_external_id_hmac"
-                logging.error(
+                logging.debug(
                     "Invalid External Id HMAC provided for org: %s",
                     request.user.id,
                 )
@@ -178,12 +178,12 @@ class IsValidExternalId(BasePermission):
                 "using your secret key and try again."
             )
             self.code = "missing_external_id_hmac"
-            logging.error("External Id Hmac not provided for org: %s", request.user.id)
+            logging.debug("External Id Hmac not provided for org: %s", request.user.id)
             return False
         else:
             self.message = "No External ID provided. Please include a valid External ID to identify the user."
             self.code = "missing_external_id"
-            logging.error("External Id Hmac provided for org: %s", request.user.id)
+            logging.debug("No External Id provided for org: %s", request.user.id)
             return False
 
 

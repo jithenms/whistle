@@ -19,6 +19,7 @@ from whistle_server.auth import (
     ServerAuth,
     IsValidExternalId,
 )
+from whistle_server.pagination import StandardLimitOffsetPagination
 from .tasks import send_batch_notification
 
 
@@ -32,6 +33,7 @@ class NotificationViewSet(
     serializer_class = NotificationSerializer
     authentication_classes = [ClientAuth]
     permission_classes = [AllowAny]
+    pagination_class = StandardLimitOffsetPagination
 
     def get_authenticators(self):
         if self.request.headers.get("X-External-Id") is None:

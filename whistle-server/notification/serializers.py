@@ -86,10 +86,13 @@ class BatchNotificationSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         delivered_to = self.context["delivered_to"]
         validated_data.pop("recipients")
-        validated_data.pop("channels")
+        if "channels" in validated_data:
+            validated_data.pop("channels")
 
         batch_notification = BatchNotification(
-            id=self.context['id'], organization_id=self.context["org_id"], **validated_data
+            id=self.context["id"],
+            organization_id=self.context["org_id"],
+            **validated_data,
         )
         batch_notification.save()
 

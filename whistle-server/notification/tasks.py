@@ -43,7 +43,7 @@ def send_batch_notification(batch_id, org_id, data):
 
     result = chord(tasks)(batch_notification_callback.s(batch_id, org_id, data))
 
-    return result.get()
+    return result
 
 
 @app.task
@@ -64,6 +64,9 @@ def handle_input_recipient(batch_id, org_id, recipient_id, data):
                     preference.first().channels.all(),
                     data,
                 )
+                return recipient.id
+            else:
+                route_basic_notification(batch_id, org_id, recipient, data)
                 return recipient.id
         else:
             route_basic_notification(batch_id, org_id, recipient, data)

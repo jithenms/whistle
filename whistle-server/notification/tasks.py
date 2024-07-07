@@ -198,7 +198,7 @@ def send_email(batch_id, org_id, user_id, data):
 
 
 @app.task(throws=(NotificationException,))
-def send_web(batch_id, org_id, user_id, data):
+def send_web(notification_id, batch_id, org_id, user_id, data):
     try:
         channel_layer = get_channel_layer()
         async_to_sync(channel_layer.group_send)(
@@ -207,11 +207,12 @@ def send_web(batch_id, org_id, user_id, data):
                 "object": "event",
                 "type": "notification.created",
                 "data": {
-                    "category": data.get("category"),
-                    "topic": data.get("topic"),
+                    "id": str(notification_id),
+                    "category": data.get("category", ""),
+                    "topic": data.get("topic", ""),
                     "title": data["title"],
                     "content": data["content"],
-                    "action_link": data.get("action_link"),
+                    "action_link": data.get("action_link", ""),
                 },
             },
         )
@@ -230,7 +231,7 @@ def send_web(batch_id, org_id, user_id, data):
 
 
 @app.task(throws=(DatabaseError,))
-def persist_notification(web_response, batch_id, org_id, user_id, data, **kwargs):
+def persist_notification(batch_id, org_id, user_id, data, **kwargs):
     data.pop("channels")
     data.pop('recipients')
     try:
@@ -366,14 +367,13 @@ def route_notification_with_preference(batch_id, org_id, recipient, channels, da
     )
     web_preference_entity = channels.get(slug="web")
     if web_preference_entity.enabled:
-        send_web.apply_async((batch_id, org_id, recipient.id, data), link=persist_notification.s(
-            batch_id,
-            org_id,
-            recipient.id,
-            data,
-            status="delivered",
-            sent_at=datetime.datetime.now(datetime.timezone.utc),
-        ))
+        persist_notification.apply_async((batch_id, org_id, recipient.id, data),
+                                         sent_at=datetime.datetime.now(datetime.timezone.utc), link=send_web.s(
+                batch_id,
+                org_id,
+                recipient.id,
+                data
+            ))
     else:
         logging.info(
             "Web push disabled for category %s for user: %s in org: %s for batch: %s",
@@ -417,21 +417,13 @@ def route_basic_notification(batch_id, org_id, recipient, data):
         org_id,
         batch_id,
     )
-    send_web.apply_async((batch_id, org_id, recipient.id, data), link=persist_notification.s(
-        batch_id,
-        org_id,
-        recipient.id,
-        data,
-        status="delivered",
-        sent_at=datetime.datetime.now(datetime.timezone.utc),
-    ), link_error=persist_notification.s(
-        batch_id,
-        org_id,
-        recipient.id,
-        data,
-        status="failed",
-        sent_at=datetime.datetime.now(datetime.timezone.utc),
-    ))
+    persist_notification.apply_async((batch_id, org_id, recipient.id, data),
+                                     sent_at=datetime.datetime.now(datetime.timezone.utc), link=send_web.s(
+            batch_id,
+            org_id,
+            recipient.id,
+            data
+        ))
     if "channels" in data:
         if "sms" in data["channels"] and recipient.phone is not None:
             send_sms.delay(batch_id, org_id, recipient.id, data)

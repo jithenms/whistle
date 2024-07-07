@@ -14,7 +14,7 @@ from organization.models import Organization
 from organization.models import OrganizationMember
 from user.models import User
 
-jwks_client = PyJWKClient(settings.JWKS_ENDPOINT)
+jwks_client = PyJWKClient(settings.WHISTLE_JWKS_ENDPOINT)
 
 
 class ServerAuth(BaseAuthentication):

@@ -11,7 +11,7 @@ from keycove import decrypt
 from external_user.models import ExternalUser
 from organization.models import Organization
 
-jwks_client = PyJWKClient(settings.JWKS_ENDPOINT)
+jwks_client = PyJWKClient(settings.WHISTLE_JWKS_ENDPOINT)
 
 
 class ClientAuthMiddleware:

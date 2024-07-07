@@ -1,0 +1,63 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: ./whistle-server/Dockerfile
+    entrypoint: /usr/local/bin/start-api.sh
+    ports:
+      - 8080:8080
+    env_file:
+      - ./whistle-server/whistle_server/.env
+    depends_on:
+      - redis
+      - db
+
+  websockets:
+    build:
+      context: .
+      dockerfile: ./whistle-server/Dockerfile
+    entrypoint: /usr/local/bin/start-websockets.sh
+    ports:
+      - 8081:8080
+    env_file:
+      - ./whistle-server/whistle_server/.env
+    depends_on:
+      - redis
+      - db
+
+  worker:
+    build:
+      context: .
+      dockerfile: ./whistle-server/Dockerfile
+    entrypoint: /usr/local/bin/start-worker.sh
+    command: --loglevel=INFO
+    env_file:
+      - ./whistle-server/whistle_server/.env
+    depends_on:
+      - redis
+      - db
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: whistle_db
+      POSTGRES_USER: whistle
+      POSTGRES_PASSWORD: whistle
+    ports:
+      - 5432:5432
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - 6379:6379
+
+  flower:
+    image: mher/flower
+    command: celery -A whistle_server flower
+    env_file:
+      - ./whistle-server/whistle_server/.env
+    ports:
+      - 5555:5555
+    depends_on:
+      - worker
+      - redis

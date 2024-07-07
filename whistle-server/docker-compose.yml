@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    command: python manage.py runserver
+    ports:
+      - 8010:8000
+    env_file:
+      - ./whistle_server/.env
+    expose:
+      - 8010
+    depends_on:
+      - redis
+      - db
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_DB=whistle_db
+      - POSTGRES_USER=whistle
+      - POSTGRES_PASSWORD=whistle
+    expose:
+      - 5432
+
+  redis:
+    image: redis:7-alpine
+    expose:
+      - 6379
+
+  celery_worker:
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    command: celery -A whistle_server worker --loglevel=info
+    env_file:
+      - ./whistle_server/.env
+    depends_on:
+      - redis
+      - db
+
+  flower:
+    image: mher/flower
+    build:
+      context: .
+    command: celery -A whistle_server flower
+    env_file:
+      - ./whistle_server/.env
+    ports:
+      - 5557:5555
+    expose:
+      - 5557
+    depends_on:
+      - redis

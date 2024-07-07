@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/5.0/ref/settings/
 
 import logging
 import os
+from socket import gethostbyname, gethostname
 from pathlib import Path
 
 from dotenv import load_dotenv, find_dotenv
@@ -20,21 +21,14 @@ load_dotenv(find_dotenv())
 
 logger = logging.getLogger(__name__)
 
-# Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/5.0/howto/deployment/checklist/
+SECRET_KEY = os.environ['DJANGO_SECRET_KEY']
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "django-insecure-@(c=-ujufw7bh_te3svxorv@!q(2^a7v44=1u==@=6npwy0(#v")
+DEBUG = bool(os.environ.get("DEBUG", 0))
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
-
-ALLOWED_HOSTS = []
-
-# Application definition
+ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", ',').split(",")
+ALLOWED_HOSTS.append(gethostbyname(gethostname()))
 
 INSTALLED_APPS = [
     "connector",
@@ -45,7 +39,6 @@ INSTALLED_APPS = [
     "organization",
     "user",
     "realtime",
-    "daphne",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -60,7 +53,7 @@ CHANNEL_LAYERS = {
     "default": {
         "BACKEND": "channels_redis.core.RedisChannelLayer",
         "CONFIG": {
-            "hosts": [("localhost", 6379)],
+            "hosts": [os.environ.get("REDIS_ENDPOINT_URL", "redis://127.0.0.1:6379/0")],
         },
     },
 }
@@ -99,9 +92,7 @@ TEMPLATES = [
 ]
 
 LOGGING = {
-    # Use v1 of the logging config schema
     'version': 1,
-    # Continue to use existing loggers
     'disable_existing_loggers': False,
     'formatters': {
         'verbose': {
@@ -109,19 +100,16 @@ LOGGING = {
             'style': '{',
         },
     },
-    # Create a log handler that prints logs to the terminal
     'handlers': {
         'console': {
             'class': 'logging.StreamHandler',
             'formatter': 'verbose',
         },
     },
-    # Define the root logger's settings
     'root': {
         'handlers': ['console'],
         'level': 'DEBUG',
     },
-    # Define the django log module's settings
     'loggers': {
         'django': {
             'handlers': ['console'],
@@ -135,25 +123,16 @@ WSGI_APPLICATION = "whistle_server.wsgi.application"
 
 ASGI_APPLICATION = "whistle_server.asgi.application"
 
-# Database
-# https://docs.djangoproject.com/en/5.0/ref/settings/#databases
-
 DATABASES = {
     "default": {
         "ENGINE": os.environ.get("SQL_ENGINE", "django.db.backends.sqlite3"),
         "NAME": os.environ.get("SQL_DATABASE", os.path.join(BASE_DIR, "db.sqlite3")),
         "USER": os.environ.get("SQL_USER", "user"),
         "PASSWORD": os.environ.get("SQL_PASSWORD", "password"),
-        "HOST": os.environ.get("SQL_HOST", "localhost"),
+        "HOST": os.environ.get("SQL_HOST", "127.0.0.1"),
         "PORT": os.environ.get("SQL_PORT", "5432"),
     }
 }
-
-CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://127.0.0.1:6379/0")
-CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", "redis://127.0.0.1:6379/0")
-
-# Password validation
-# https://docs.djangoproject.com/en/5.0/ref/settings/#auth-password-validators
 
 AUTH_PASSWORD_VALIDATORS = [
     {
@@ -170,9 +149,6 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
-# Internationalization
-# https://docs.djangoproject.com/en/5.0/topics/i18n/
-
 LANGUAGE_CODE = "en-us"
 
 TIME_ZONE = "UTC"
@@ -181,13 +157,7 @@ USE_I18N = True
 
 USE_TZ = True
 
-# Static files (CSS, JavaScript, Images)
-# https://docs.djangoproject.com/en/5.0/howto/static-files/
-
 STATIC_URL = "static/"
-
-# Default primary key field type
-# https://docs.djangoproject.com/en/5.0/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
@@ -195,5 +165,8 @@ CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_TASK_TRACK_STARTED = True
 
+CELERY_BROKER_URL = os.environ.get("REDIS_ENDPOINT_URL", "redis://127.0.0.1:6379/0")
+CELERY_RESULT_BACKEND = os.environ.get("REDIS_ENDPOINT_URL", "redis://127.0.0.1:6379/0")
+
 WHISTLE_SECRET_KEY = os.getenv("WHISTLE_SECRET_KEY")
-JWKS_ENDPOINT = os.getenv("JWKS_ENDPOINT")
+WHISTLE_JWKS_ENDPOINT = os.getenv("WHISTLE_JWKS_ENDPOINT")

@@ -3,12 +3,12 @@ import os
 from channels.routing import ProtocolTypeRouter, URLRouter
 from django.core.asgi import get_asgi_application
 
-from realtime import routing
-from realtime.middleware import ClientAuthMiddleware
-
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "whistle_server.settings")
 
 django_asgi_app = get_asgi_application()
+
+from realtime import routing
+from realtime.middleware import ClientAuthMiddleware
 
 application = ProtocolTypeRouter(
     {

@@ -3,11 +3,12 @@ FROM python:3.11-slim-buster
 ENV PYTHONUNBUFFERED 1
 ENV PYTHONDONTWRITEBYTECODE 1
 
-COPY ./bin .
-COPY ./whistle-server .
+COPY whistle-server/requirements.txt .
 
 RUN pip install --upgrade pip
 RUN pip install -r requirements.txt
+
+COPY whistle-server .
 
 COPY bin/start-api.sh /usr/local/bin/start-api.sh
 COPY bin/start-websockets.sh /usr/local/bin/start-websockets.sh

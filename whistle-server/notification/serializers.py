@@ -36,7 +36,6 @@ class NotificationSerializer(serializers.ModelSerializer):
             "category",
             "topic",
             "title",
-            "status",
             "content",
             "action_link",
             "sent_at",
@@ -44,7 +43,7 @@ class NotificationSerializer(serializers.ModelSerializer):
             "read_at",
             "archived_at",
         ]
-        read_only_fields = ("recipient", "sent_at", "status")
+        read_only_fields = ("recipient", "sent_at")
 
     def update(self, instance, validated_data):
         for field in [

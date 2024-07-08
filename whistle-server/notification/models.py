@@ -15,7 +15,6 @@ class Notification(models.Model):
     title = models.CharField(max_length=255)
     content = models.CharField(max_length=255)
     action_link = models.CharField(max_length=255, blank=True)
-    status = models.CharField(max_length=255)
     sent_at = models.DateTimeField(null=True, blank=True)
     seen_at = models.DateTimeField(null=True, blank=True)
     read_at = models.DateTimeField(null=True, blank=True)

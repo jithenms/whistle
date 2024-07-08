@@ -1,4 +1,3 @@
-"use client";
 import MockInbox from "../../components/mock/MockInbox";
 import { HeroHighlight, Highlight } from "../../components/ui/hero-highlight";
 import { Input } from "../../components/ui/input";

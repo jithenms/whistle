@@ -30,7 +30,7 @@ services:
       context: .
       dockerfile: ./whistle-server/Dockerfile
     entrypoint: /usr/local/bin/start-worker.sh
-    command: --loglevel=INFO
+    command: --loglevel=DEBUG
     env_file:
       - ./whistle-server/whistle_server/.env
     depends_on:
@@ -41,8 +41,8 @@ services:
     image: postgres:16-alpine
     environment:
       POSTGRES_DB: whistle_db
-      POSTGRES_USER: whistle
-      POSTGRES_PASSWORD: whistle
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
     ports:
       - 5432:5432
 
@@ -53,7 +53,7 @@ services:
 
   flower:
     image: mher/flower
-    command: celery -A whistle_server flower
+    command: celery flower
     env_file:
       - ./whistle-server/whistle_server/.env
     ports:

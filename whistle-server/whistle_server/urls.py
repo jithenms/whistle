@@ -48,5 +48,6 @@ v1_router.register(
 
 urlpatterns = [
     path("admin/", admin.site.urls),
+    path(r"health/", include("health_check.urls")),
     path("api/v1/", include(v1_router.urls)),
 ]

@@ -23,6 +23,7 @@ class NotificationChannelsSerializer(serializers.Serializer):
 
 class NotificationSerializer(serializers.ModelSerializer):
     recipient = ExternalUserSerializer(read_only=True)
+    additional_info = serializers.JSONField(required=False)
 
     seen_at = serializers.DateTimeField(required=False)
     read_at = serializers.DateTimeField(required=False)
@@ -38,6 +39,7 @@ class NotificationSerializer(serializers.ModelSerializer):
             "title",
             "content",
             "action_link",
+            "additional_info"
             "sent_at",
             "seen_at",
             "read_at",
@@ -64,6 +66,7 @@ class BatchNotificationSerializer(serializers.ModelSerializer):
     id = serializers.UUIDField()
     recipients = ExternalUserSerializer(many=True)
     channels = NotificationChannelsSerializer(required=False)
+    additional_info = serializers.JSONField(required=False)
 
     class Meta:
         model = BatchNotification
@@ -74,8 +77,10 @@ class BatchNotificationSerializer(serializers.ModelSerializer):
             "topic",
             "channels",
             "title",
-            "status",
             "content",
+            "action_link",
+            "additional_info",
+            "status",
         ]
         read_only_fields = ("status",)
 

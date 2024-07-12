@@ -239,7 +239,8 @@ def persist_notification(batch_id, org_id, user_id, data, **kwargs):
                                                    category=data.get('category', ""), topic=data.get('topic', ""),
                                                    title=data.get('title', ""),
                                                    content=data.get('content', ""),
-                                                   action_link=data.get('action_link', ""), **kwargs)
+                                                   action_link=data.get('action_link', ""),
+                                                   additional_info=data.get('additional_info'), **kwargs)
 
         logging.info(
             "Notification record with id: %s persisted for user: %s and org: %s for batch: %s",

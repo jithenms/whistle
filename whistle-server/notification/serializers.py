@@ -39,7 +39,7 @@ class NotificationSerializer(serializers.ModelSerializer):
             "title",
             "content",
             "action_link",
-            "additional_info"
+            "additional_info",
             "sent_at",
             "seen_at",
             "read_at",

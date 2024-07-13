@@ -47,6 +47,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "channels",
     'health_check', 
+    'drf_spectacular'
 ]
 
 CHANNEL_LAYERS = {
@@ -71,6 +72,17 @@ MIDDLEWARE = [
 REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": ("rest_framework.renderers.JSONRenderer",),
     "EXCEPTION_HANDLER": "whistle_server.exceptions.custom_exception_handler",
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+}
+
+import whistle_server.schema
+
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'Whistle API',
+    'DESCRIPTION': 'REST API for the Whistle notification platform',
+    'VERSION': '1.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
+    # OTHER SETTINGS
 }
 
 ROOT_URLCONF = "whistle_server.urls"

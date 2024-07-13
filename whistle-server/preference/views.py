@@ -8,6 +8,8 @@ from preference.models import ExternalUserPreference
 from preference.serializers import ExternalUserPreferenceSerializer
 from whistle_server.auth import ClientAuth, IsValidExternalId
 
+from drf_spectacular.utils import extend_schema, OpenApiParameter
+
 
 class ExternalUserPreferenceViewSet(ModelViewSet):
     queryset = ExternalUserPreference.objects.all()
@@ -16,7 +18,7 @@ class ExternalUserPreferenceViewSet(ModelViewSet):
     permission_classes = [IsValidExternalId]
 
     def get_queryset(self):
-        external_id = self.request.headers.get("X-External-Id")
+        external_id = self.request.headers.get("X-External-Id") if self.request else None
         try:
             user = ExternalUser.objects.get(
                 external_id=external_id,
@@ -38,3 +40,57 @@ class ExternalUserPreferenceViewSet(ModelViewSet):
         context = super().get_serializer_context()
         context.update({"external_id": self.request.headers.get("X-External-Id")})
         return context
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(name='X-External-Id', type=str, location=OpenApiParameter.HEADER, description='External ID', required=True),
+            OpenApiParameter(name='X-External-Id-Hmac', type=str, location=OpenApiParameter.HEADER, description='External ID HMAC', required=True)
+        ]
+    )
+    def create(self, request, *args, **kwargs):
+        return super().create(request, *args, **kwargs)
+    
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(name='X-External-Id', type=str, location=OpenApiParameter.HEADER, description='External ID', required=True),
+            OpenApiParameter(name='X-External-Id-Hmac', type=str, location=OpenApiParameter.HEADER, description='External ID HMAC', required=True)
+        ]
+    )
+    def update(self, request, *args, **kwargs):
+        return super().update(request, *args, **kwargs)
+    
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(name='X-External-Id', type=str, location=OpenApiParameter.HEADER, description='External ID', required=True),
+            OpenApiParameter(name='X-External-Id-Hmac', type=str, location=OpenApiParameter.HEADER, description='External ID HMAC', required=True)
+        ]
+    )
+    def partial_update(self, request, *args, **kwargs):
+        return super().partial_update(request, *args, **kwargs)
+    
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(name='X-External-Id', type=str, location=OpenApiParameter.HEADER, description='External ID', required=True),
+            OpenApiParameter(name='X-External-Id-Hmac', type=str, location=OpenApiParameter.HEADER, description='External ID HMAC', required=True)
+        ]
+    )
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
+    
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(name='X-External-Id', type=str, location=OpenApiParameter.HEADER, description='External ID', required=True),
+            OpenApiParameter(name='X-External-Id-Hmac', type=str, location=OpenApiParameter.HEADER, description='External ID HMAC', required=True)
+        ]
+    )
+    def retrieve(self, request, *args, **kwargs):
+        return super().retrieve(request, *args, **kwargs)
+    
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(name='X-External-Id', type=str, location=OpenApiParameter.HEADER, description='External ID', required=True),
+            OpenApiParameter(name='X-External-Id-Hmac', type=str, location=OpenApiParameter.HEADER, description='External ID HMAC', required=True)
+        ]
+    )
+    def destroy(self, request, *args, **kwargs):
+        return super().destroy(request, *args, **kwargs)

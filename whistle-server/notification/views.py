@@ -22,6 +22,7 @@ from whistle_server.auth import (
 from whistle_server.pagination import StandardLimitOffsetPagination
 from .tasks import send_batch_notification
 
+from drf_spectacular.utils import extend_schema, OpenApiParameter
 
 class NotificationViewSet(
     mixins.ListModelMixin,
@@ -36,17 +37,19 @@ class NotificationViewSet(
     pagination_class = StandardLimitOffsetPagination
 
     def get_authenticators(self):
-        if self.request.headers.get("X-External-Id") is None:
+        external_id = self.request.headers.get("X-External-Id") if self.request else None
+        if external_id is None:
             return [ServerAuth()]
         return super(NotificationViewSet, self).get_authenticators()
 
     def get_permissions(self):
-        if self.request.headers.get("X-External-Id") is not None:
+        external_id = self.request.headers.get("X-External-Id") if self.request else None
+        if external_id is not None:
             return [IsValidExternalId()]
         return [AllowAny()]
 
     def get_queryset(self):
-        external_id = self.request.headers.get("X-External-Id")
+        external_id = self.request.headers.get("X-External-Id") if self.request else None
         if external_id is not None:
             try:
                 user = ExternalUser.objects.get(external_id=external_id)
@@ -63,6 +66,15 @@ class NotificationViewSet(
             return self.queryset.filter(organization=self.request.user, recipient=user)
         else:
             return self.queryset.filter(organization=self.request.user)
+    
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(name='X-External-Id', type=str, location=OpenApiParameter.HEADER, description='External ID'),
+            OpenApiParameter(name='X-External-Id-Hmac', type=str, location=OpenApiParameter.HEADER, description='External ID HMAC')
+        ]
+    )
+    def list(self, request):
+        return super().list(request)
 
 
 class BatchNotificationViewSet(

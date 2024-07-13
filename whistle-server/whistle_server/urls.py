@@ -21,7 +21,7 @@ from rest_framework.routers import DefaultRouter
 
 from connector.views import SendgridViewSet, TwilioViewSet
 from external_user.views import ExternalUserViewSet
-from notification.views import NotificationViewSet, BatchNotificationViewSet
+from notification.views import NotificationViewSet, BroadcastViewSet
 from organization.views import OrganizationViewSet
 from preference.views import ExternalUserPreferenceViewSet
 from subscription.views import ExternalUserSubscriptionViewSet
@@ -29,22 +29,12 @@ from subscription.views import ExternalUserSubscriptionViewSet
 v1_router = DefaultRouter()
 v1_router.register(r"organizations", OrganizationViewSet, basename="organizations")
 v1_router.register(r"users", ExternalUserViewSet, basename="external_users")
-v1_router.register(
-    r"preferences", ExternalUserPreferenceViewSet, basename="preferences"
-)
-v1_router.register(
-    r"subscriptions", ExternalUserSubscriptionViewSet, basename="subscriptions"
-)
-v1_router.register(
-    r"notifications/batch",
-    BatchNotificationViewSet,
-    basename="notifications-batch",
-)
+v1_router.register(r"preferences", ExternalUserPreferenceViewSet, basename="preferences")
+v1_router.register(r"subscriptions", ExternalUserSubscriptionViewSet, basename="subscriptions")
+v1_router.register(r"broadcasts", BroadcastViewSet, basename="broadcasts")
 v1_router.register(r"notifications", NotificationViewSet, basename="notifications")
 v1_router.register(r"connectors/twilio", TwilioViewSet, basename="connectors.twilio")
-v1_router.register(
-    r"connectors/sendgrid", SendgridViewSet, basename="connectors.sendgrid"
-)
+v1_router.register(r"connectors/sendgrid", SendgridViewSet, basename="connectors.sendgrid")
 
 urlpatterns = [
     path("admin/", admin.site.urls),

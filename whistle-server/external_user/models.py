@@ -14,6 +14,7 @@ class ExternalUser(models.Model):
     last_name = models.CharField(max_length=255, blank=True)
     email = models.CharField(max_length=255)
     phone = models.CharField(max_length=255, blank=True)
+    metadata = models.JSONField(null=True, blank=True)
 
     class Meta:
         unique_together = [['organization', 'email'], ['organization', 'phone'], ['organization', 'external_id']]

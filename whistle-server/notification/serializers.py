@@ -3,7 +3,7 @@ from rest_framework import serializers
 from external_user.serializers import ExternalUserSerializer
 from notification.models import (
     Notification,
-    BatchNotification,
+    Broadcast,
 )
 
 
@@ -62,14 +62,14 @@ class NotificationSerializer(serializers.ModelSerializer):
         return super().update(instance, validated_data)
 
 
-class BatchNotificationSerializer(serializers.ModelSerializer):
+class BroadcastSerializer(serializers.ModelSerializer):
     id = serializers.UUIDField()
     recipients = ExternalUserSerializer(many=True)
     channels = NotificationChannelsSerializer(required=False)
     additional_info = serializers.JSONField(required=False)
 
     class Meta:
-        model = BatchNotification
+        model = Broadcast
         fields = [
             "id",
             "recipients",
@@ -90,6 +90,6 @@ class BatchNotificationSerializer(serializers.ModelSerializer):
         validated_data.pop("recipients")
         if "channels" in validated_data:
             validated_data.pop("channels")
-        instance = BatchNotification(**validated_data, **kwargs)
+        instance = Broadcast(**validated_data, **kwargs)
         instance.save()
         return instance

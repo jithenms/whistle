@@ -22,11 +22,11 @@ class Notification(models.Model):
     archived_at = models.DateTimeField(null=True, blank=True)
 
 
-class BatchNotification(models.Model):
+class Broadcast(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
     recipients = models.ManyToManyField(
-        ExternalUser, related_name="batch_notifications"
+        ExternalUser, related_name="broadcasts"
     )
     category = models.SlugField(null=True, blank=True)
     topic = models.CharField(max_length=255, blank=True)

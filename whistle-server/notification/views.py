@@ -9,10 +9,10 @@ from rest_framework.permissions import AllowAny
 from rest_framework.viewsets import GenericViewSet
 
 from external_user.models import ExternalUser
-from notification.models import Notification, BatchNotification
+from notification.models import Notification, Broadcast
 from notification.serializers import (
     NotificationSerializer,
-    BatchNotificationSerializer,
+    BroadcastSerializer,
 )
 from whistle_server.auth import (
     ClientAuth,
@@ -20,9 +20,10 @@ from whistle_server.auth import (
     IsValidExternalId,
 )
 from whistle_server.pagination import StandardLimitOffsetPagination
-from .tasks import send_batch_notification
+from .tasks import send_broadcast
 
 from drf_spectacular.utils import extend_schema, OpenApiParameter
+
 
 class NotificationViewSet(
     mixins.ListModelMixin,
@@ -66,45 +67,47 @@ class NotificationViewSet(
             return self.queryset.filter(organization=self.request.user, recipient=user)
         else:
             return self.queryset.filter(organization=self.request.user)
-    
+
     @extend_schema(
         parameters=[
-            OpenApiParameter(name='X-External-Id', type=str, location=OpenApiParameter.HEADER, description='External ID'),
-            OpenApiParameter(name='X-External-Id-Hmac', type=str, location=OpenApiParameter.HEADER, description='External ID HMAC')
+            OpenApiParameter(name='X-External-Id', type=str, location=OpenApiParameter.HEADER,
+                             description='External ID'),
+            OpenApiParameter(name='X-External-Id-Hmac', type=str, location=OpenApiParameter.HEADER,
+                             description='External ID HMAC')
         ]
     )
     def list(self, request):
         return super().list(request)
 
 
-class BatchNotificationViewSet(
+class BroadcastViewSet(
     CreateAPIView,
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
     GenericViewSet,
 ):
-    queryset = BatchNotification.objects.all()
-    serializer_class = BatchNotificationSerializer
+    queryset = Broadcast.objects.all()
+    serializer_class = BroadcastSerializer
     authentication_classes = [ServerAuth]
 
     def create(self, request, *args, **kwargs):
-        batch_id = uuid.uuid4()
-        serializer = self.get_serializer(data={'id': batch_id, **request.data})
+        broadcast_id = uuid.uuid4()
+        serializer = self.get_serializer(data={'id': broadcast_id, **request.data})
         serializer.is_valid(raise_exception=True)
         instance = serializer.save(status="queued")
         try:
-            send_batch_notification.delay(batch_id, self.request.user.id, serializer.validated_data)
+            send_broadcast.delay(broadcast_id, self.request.user.id, serializer.validated_data)
             logging.info(
-                "Batch notification queued with id: %s for org: %s",
-                batch_id,
+                "Broadcast queued with id: %s for org: %s",
+                broadcast_id,
                 self.request.user.id,
             )
         except:
             instance.status = "failed"
             instance.save()
             logging.info(
-                "Batch notification failed to queue with id: %s for org: %s",
-                batch_id,
+                "Broadcast failed to queue with id: %s for org: %s",
+                broadcast_id,
                 self.request.user.id,
             )
         response_data = serializer.validated_data

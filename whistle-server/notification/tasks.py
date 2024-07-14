@@ -12,7 +12,7 @@ from twilio.rest import Client
 
 from connector.models import Twilio, Sendgrid
 from external_user.models import ExternalUser
-from notification.models import Notification, BatchNotification
+from notification.models import Notification, Broadcast
 from preference.models import ExternalUserPreference
 from subscription.models import ExternalUserSubscription
 from whistle_server.celery import app
@@ -20,16 +20,16 @@ from whistle_server.exceptions import NotificationException
 
 
 @app.task
-def send_batch_notification(batch_id, org_id, data):
+def send_broadcast(broadcast_id, org_id, data):
     tasks = []
     recipient_ids = set()
 
     for recipient in data["recipients"]:
         try:
             recipient_entity = update_or_create_external_user(
-                batch_id, org_id, recipient, data
+                broadcast_id, org_id, recipient, data
             )
-            tasks.append(handle_recipient.s(batch_id, org_id, recipient_entity.id, data))
+            tasks.append(handle_recipient.s(broadcast_id, org_id, recipient_entity.id, data))
             recipient_ids.add(recipient_entity.id)
         except NotificationException:
             continue
@@ -38,15 +38,15 @@ def send_batch_notification(batch_id, org_id, data):
 
         for subscriber in subscribers:
             if subscriber.id not in recipient_ids:
-                tasks.append(handle_topic_subscriber.s(batch_id, org_id, subscriber, data))
+                tasks.append(handle_topic_subscriber.s(broadcast_id, org_id, subscriber, data))
 
-    result = chord(tasks)(update_batch_notification.s(batch_id, org_id, data))
+    result = chord(tasks)(update_broadcast.s(broadcast_id, org_id, data))
 
     return result.id
 
 
 @app.task
-def handle_recipient(batch_id, org_id, recipient_id, data):
+def handle_recipient(broadcast_id, org_id, recipient_id, data):
     try:
         recipient = ExternalUser.objects.get(pk=recipient_id)
 
@@ -57,7 +57,7 @@ def handle_recipient(batch_id, org_id, recipient_id, data):
 
             if preference:
                 route_notification_with_preference(
-                    batch_id,
+                    broadcast_id,
                     org_id,
                     recipient,
                     preference.first().channels.all(),
@@ -65,17 +65,17 @@ def handle_recipient(batch_id, org_id, recipient_id, data):
                 )
                 return recipient.id
             else:
-                route_basic_notification(batch_id, org_id, recipient, data)
+                route_basic_notification(broadcast_id, org_id, recipient, data)
                 return recipient.id
         else:
-            route_basic_notification(batch_id, org_id, recipient, data)
+            route_basic_notification(broadcast_id, org_id, recipient, data)
             return recipient.id
     except NotificationException:
         return
 
 
 @app.task
-def handle_topic_subscriber(batch_id, org_id, subscriber_id, data):
+def handle_topic_subscriber(broadcast_id, org_id, subscriber_id, data):
     try:
         subscriber = ExternalUserSubscription.objects.get(pk=subscriber_id)
 
@@ -90,7 +90,7 @@ def handle_topic_subscriber(batch_id, org_id, subscriber_id, data):
 
             if subscriber_category and preference and subscriber_category.first().enabled:
                 route_notification_with_preference(
-                    batch_id,
+                    broadcast_id,
                     org_id,
                     subscriber.user,
                     preference.first().channels.all(),
@@ -98,17 +98,17 @@ def handle_topic_subscriber(batch_id, org_id, subscriber_id, data):
                 )
                 return subscriber.id
             elif subscriber_category and subscriber_category.first().enabled:
-                route_basic_notification(batch_id, org_id, subscriber.user, data)
+                route_basic_notification(broadcast_id, org_id, subscriber.user, data)
                 return subscriber.id
         else:
-            route_basic_notification(batch_id, org_id, subscriber.user, data)
+            route_basic_notification(broadcast_id, org_id, subscriber.user, data)
             return subscriber.id
     except NotificationException:
         return
 
 
 @app.task(throws=(NotificationException,))
-def send_sms(batch_id, org_id, user_id, data):
+def send_sms(broadcast_id, org_id, user_id, data):
     try:
         user = ExternalUser.objects.get(id=user_id)
         twilio_connection = Twilio.objects.get(organization_id=org_id)
@@ -128,24 +128,24 @@ def send_sms(batch_id, org_id, user_id, data):
         return message
     except TwilioRestException as error:
         logging.error(
-            "Twilio failed to send text to user: %s for batch: %s with message: ",
+            "Twilio failed to send text to user: %s for broadcast: %s with message: ",
             user_id,
-            batch_id,
+            broadcast_id,
             error.msg,
         )
     except Twilio.DoesNotExist:
         logging.error(
-            "Twilio account not connected for org: %s for batch: %s", org_id, batch_id
+            "Twilio account not connected for org: %s for broadcast: %s", org_id, broadcast_id
         )
         raise NotificationException(
             "Twilio account not connected", "twilio_account_not_connected"
         )
     except ExternalUser.DoesNotExist:
         logging.error(
-            "Recipient not found by id: %s for org: %s and batch: %s",
+            "Recipient not found by id: %s for org: %s and broadcast: %s",
             user_id,
             org_id,
-            batch_id,
+            broadcast_id,
         )
         raise NotificationException(
             "Recipient not found by id",
@@ -154,7 +154,7 @@ def send_sms(batch_id, org_id, user_id, data):
 
 
 @app.task(throws=(NotificationException,))
-def send_email(batch_id, org_id, user_id, data):
+def send_email(broadcast_id, org_id, user_id, data):
     try:
         user = ExternalUser.objects.get(id=user_id)
         sendgrid_conn = Sendgrid.objects.get(organization_id=org_id)
@@ -167,29 +167,29 @@ def send_email(batch_id, org_id, user_id, data):
         mail = Mail(from_email, to_email, subject, content)
         response = sg.client.mail.send.post(request_body=mail.get())
         logging.info(
-            "Sendgrid email sent to user: %s with batch: %s", user_id, batch_id
+            "Sendgrid email sent to user: %s with broadcast: %s", user_id, broadcast_id
         )
         return response
     except HTTPError as error:
         logging.error(
-            "Sendgrid failed to send email to user: %s for batch: %s with reason: ",
+            "Sendgrid failed to send email to user: %s for broadcast: %s with reason: ",
             user_id,
-            batch_id,
+            broadcast_id,
             error.reason,
         )
     except Sendgrid.DoesNotExist:
         logging.error(
-            "Sendgrid account not connected for org: %s for batch: %s", org_id, batch_id
+            "Sendgrid account not connected for org: %s for broadcast: %s", org_id, broadcast_id
         )
         raise NotificationException(
             "Sendgrid account not connected", "sendgrid_account_not_connected"
         )
     except ExternalUser.DoesNotExist:
         logging.error(
-            "Recipient not found by id: %s for org: %s and batch: %s",
+            "Recipient not found by id: %s for org: %s and broadcast: %s",
             user_id,
             org_id,
-            batch_id,
+            broadcast_id,
         )
         raise NotificationException(
             "Recipient not found by id",
@@ -198,7 +198,7 @@ def send_email(batch_id, org_id, user_id, data):
 
 
 @app.task(throws=(NotificationException,))
-def send_web(notification_id, batch_id, org_id, user_id, data):
+def send_web(notification_id, broadcast_id, org_id, user_id, data):
     try:
         channel_layer = get_channel_layer()
         async_to_sync(channel_layer.group_send)(
@@ -219,10 +219,10 @@ def send_web(notification_id, batch_id, org_id, user_id, data):
         return
     except ExternalUser.DoesNotExist:
         logging.error(
-            "Recipient not found by id: %s for org: %s and batch: %s",
+            "Recipient not found by id: %s for org: %s and broadcast: %s",
             user_id,
             org_id,
-            batch_id,
+            broadcast_id,
         )
         raise NotificationException(
             "Recipient not found by id",
@@ -231,7 +231,7 @@ def send_web(notification_id, batch_id, org_id, user_id, data):
 
 
 @app.task(throws=(DatabaseError,))
-def persist_notification(batch_id, org_id, user_id, data, **kwargs):
+def persist_notification(broadcast_id, org_id, user_id, data, **kwargs):
     data.pop("channels")
     data.pop('recipients')
     try:
@@ -243,67 +243,67 @@ def persist_notification(batch_id, org_id, user_id, data, **kwargs):
                                                    additional_info=data.get('additional_info'), **kwargs)
 
         logging.info(
-            "Notification record with id: %s persisted for user: %s and org: %s for batch: %s",
+            "Notification record with id: %s persisted for user: %s and org: %s for broadcast: %s",
             notification.id,
             user_id,
             org_id,
-            batch_id,
+            broadcast_id,
         )
     except DatabaseError as error:
         logging.error(
             "Failed to save notification record to database for user: %s "
-            "and org: %s for batch: %s with database error: %s",
+            "and org: %s for broadcast: %s with database error: %s",
             user_id,
             org_id,
-            batch_id,
+            broadcast_id,
             error,
         )
         raise
     try:
-        batch_notification = BatchNotification.objects.get(pk=batch_id)
+        broadcast = Broadcast.objects.get(pk=broadcast_id)
         external_user = ExternalUser.objects.get(pk=user_id)
-        batch_notification.recipients.add(external_user)
+        broadcast.recipients.add(external_user)
 
         logging.info(
-            "External user: %s added to batch: %s in org: %s",
+            "External user: %s added to broadcast: %s in org: %s",
             user_id,
-            batch_id,
+            broadcast_id,
             org_id,
         )
 
         return notification.id
     except DatabaseError as error:
         logging.error(
-            "Failed to add notification record to batch for user: %s "
-            "and org: %s for batch: %s with database error: %s",
+            "Failed to add notification record to broadcast for user: %s "
+            "and org: %s for broadcast: %s with database error: %s",
             user_id,
             org_id,
-            batch_id,
+            broadcast_id,
             error,
         )
         raise
 
 
 @app.task(throws=(DatabaseError,))
-def update_batch_notification(delivered_to, batch_id, org_id, data):
+def update_broadcast(delivered_to, broadcast_id, org_id, data):
     data.pop("channels")
     data.pop("recipients")
     try:
-        batch_notification = BatchNotification.objects.get(pk=batch_id)
-        batch_notification.status = "processed"
-        batch_notification.save()
-        return batch_id
+        broadcast = Broadcast.objects.get(pk=broadcast_id)
+        broadcast.status = "processed"
+        broadcast.save()
+        return broadcast_id
     except DatabaseError as error:
         logging.error(
-            "Failed to update batch notification to processed for batch: %s in org: %s with database error: %s",
-            batch_id,
+            "Failed to update broadcast notification to processed for broadcast: %s in org: %s with database error: %s",
+            broadcast_id,
             org_id,
             error,
         )
         raise
 
 
-def update_or_create_external_user(batch_id, org_id, recipient, data):
+def update_or_create_external_user(broadcast_id, org_id, recipient, data):
     if "external_id" in recipient:
         recipient_entity, created = ExternalUser.objects.update_or_create(
             organization_id=org_id,
@@ -319,15 +319,15 @@ def update_or_create_external_user(batch_id, org_id, recipient, data):
         if created and "channels" in data:
             if "email" in data["channels"] and "email" not in recipient:
                 logging.error(
-                    "Email included in channels but email not provided for new user for org: %s and batch: %s",
+                    "Email included in channels but email not provided for new user for org: %s and broadcast: %s",
                     org_id,
-                    batch_id,
+                    broadcast_id,
                 )
             if "sms" in data["channels"] and "phone" not in recipient:
                 logging.error(
-                    "SMS included in channels but phone not provided for new user for org: %s and batch: %s",
+                    "SMS included in channels but phone not provided for new user for org: %s and broadcast: %s",
                     org_id,
-                    batch_id,
+                    broadcast_id,
                 )
 
         return recipient_entity
@@ -339,9 +339,9 @@ def update_or_create_external_user(batch_id, org_id, recipient, data):
             )
         except ExternalUser.DoesNotExist:
             logging.error(
-                "Recipient not found by email for org: %s and batch: %s",
+                "Recipient not found by email for org: %s and broadcast: %s",
                 org_id,
-                batch_id,
+                broadcast_id,
             )
             raise NotificationException(
                 "Recipient not found by email",
@@ -349,9 +349,9 @@ def update_or_create_external_user(batch_id, org_id, recipient, data):
             )
     else:
         logging.error(
-            "Identifier for recipient not provided for org: %s and batch: %s",
+            "Identifier for recipient not provided for org: %s and broadcast: %s",
             org_id,
-            batch_id,
+            broadcast_id,
         )
         raise NotificationException(
             "Identifier for recipient not provided",
@@ -359,81 +359,81 @@ def update_or_create_external_user(batch_id, org_id, recipient, data):
         )
 
 
-def route_notification_with_preference(batch_id, org_id, recipient, channels, data):
+def route_notification_with_preference(broadcast_id, org_id, recipient, channels, data):
     logging.info(
-        "Routing notification with preference for user: %s in org: %s for batch: %s",
+        "Routing notification with preference for user: %s in org: %s for broadcast: %s",
         recipient.id,
         org_id,
-        batch_id,
+        broadcast_id,
     )
     web_preference_entity = channels.get(slug="web")
     if web_preference_entity.enabled:
-        persist_notification.apply_async((batch_id, org_id, recipient.id, data),
+        persist_notification.apply_async((broadcast_id, org_id, recipient.id, data),
                                          sent_at=datetime.datetime.now(datetime.timezone.utc), link=send_web.s(
-                batch_id,
+                broadcast_id,
                 org_id,
                 recipient.id,
                 data
             ))
     else:
         logging.info(
-            "Web push disabled for category %s for user: %s in org: %s for batch: %s",
+            "Web push disabled for category %s for user: %s in org: %s for broadcast: %s",
             data.get("category", None),
             recipient.id,
             org_id,
-            batch_id,
+            broadcast_id,
         )
     if "channels" in data:
         if "sms" in data["channels"] and recipient.phone is not None:
             sms_preference_entity = channels.get(slug="sms")
             if sms_preference_entity.enabled:
-                send_sms.delay(batch_id, org_id, recipient.id, data)
+                send_sms.delay(broadcast_id, org_id, recipient.id, data)
             else:
                 logging.info(
-                    "SMS disabled for category %s for user: %s in org: %s for batch: %s",
+                    "SMS disabled for category %s for user: %s in org: %s for broadcast: %s",
                     data.get("category", None),
                     recipient.id,
                     org_id,
-                    batch_id,
+                    broadcast_id,
                 )
 
         if "email" in data["channels"]:
             email_preference_entity = channels.get(slug="email")
             if email_preference_entity.enabled:
-                send_email.delay(batch_id, org_id, recipient.id, data)
+                send_email.delay(broadcast_id, org_id, recipient.id, data)
             else:
                 logging.info(
-                    "Email disabled for category %s for user: %s in org: %s for batch: %s",
+                    "Email disabled for category %s for user: %s in org: %s for broadcast: %s",
                     data.get("category", None),
                     recipient.id,
                     org_id,
-                    batch_id,
+                    broadcast_id,
                 )
 
 
-def route_basic_notification(batch_id, org_id, recipient, data):
+def route_basic_notification(broadcast_id, org_id, recipient, data):
     logging.info(
-        "Routing basic notification for user: %s in org: %s for batch: %s",
+        "Routing basic notification for user: %s in org: %s for broadcast: %s",
         recipient.id,
         org_id,
-        batch_id,
+        broadcast_id,
     )
-    persist_notification.apply_async((batch_id, org_id, recipient.id, data),
+    persist_notification.apply_async((broadcast_id, org_id, recipient.id, data),
                                      sent_at=datetime.datetime.now(datetime.timezone.utc), link=send_web.s(
-            batch_id,
+            broadcast_id,
             org_id,
             recipient.id,
             data
         ))
     if "channels" in data:
         if "sms" in data["channels"] and recipient.phone is not None:
-            send_sms.delay(batch_id, org_id, recipient.id, data)
+            send_sms.delay(broadcast_id, org_id, recipient.id, data)
         elif recipient.phone is None:
             logging.warning(
-                "Trying to route SMS notification without phone on record for user: %s in org: %s for batch: %s",
+                "Trying to route SMS notification without phone on record for user: %s in org: %s for broadcast: %s",
                 recipient.id,
                 org_id,
-                batch_id,
+                broadcast_id,
             )
         if "email" in data["channels"]:
-            send_email.delay(batch_id, org_id, recipient.id, data)
+            send_email.delay(broadcast_id, org_id, recipient.id, data)

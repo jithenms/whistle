@@ -13,10 +13,11 @@ class ExternalUserSerializer(serializers.ModelSerializer):
     last_name = serializers.CharField(max_length=255, required=False)
     email = serializers.CharField(max_length=255, required=False)
     phone = serializers.CharField(max_length=255, required=False)
+    metadata = serializers.JSONField(required=False)
 
     class Meta:
         model = ExternalUser
-        fields = ["id", "external_id", "first_name", "last_name", "email", "phone"]
+        fields = ["id", "external_id", "first_name", "last_name", "email", "phone", "metadata"]
 
     def create(self, validated_data):
         org = self.context["request"].user

@@ -54,7 +54,7 @@ class ExternalUserSubscriptionSerializer(serializers.ModelSerializer):
                 "invalid_external_id",
             )
 
-    def update(self, instance, validated_data):
+    def update(self, instance, validated_data, **kwargs):
         org = self.context["request"].user
         external_id = self.context.get("external_id")
         with transaction.atomic():
@@ -62,13 +62,19 @@ class ExternalUserSubscriptionSerializer(serializers.ModelSerializer):
             instance.slug = validated_data.get("slug", instance.slug)
             instance.save()
 
-            ExternalUserSubscriptionCategory.objects.filter(
-                user_subscription=instance
-            ).delete()
-            for cat in category_data:
-                ExternalUserSubscriptionCategory.objects.create(
-                    user_subscription=instance, **cat
-                )
+            if self.partial:
+                for category in category_data:
+                    ExternalUserSubscriptionCategory.objects.update_or_create(user_subscription=instance,
+                                                                              slug=category.get('slug'),
+                                                                              defaults={'description':
+                                                                                            category.get(
+                                                                                                'description')
+                                                                                        })
+            else:
+                ExternalUserSubscriptionCategory.objects.filter(user_subscription=instance).delete()
+                for category in category_data:
+                    ExternalUserSubscriptionCategory.objects.create(user_preference=instance, **category)
+
             logging.info("Subscription with id: %s updated for user: %s in org: %s", instance.id,
                          instance.user.id, org.id)
 

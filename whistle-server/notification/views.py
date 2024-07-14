@@ -37,6 +37,10 @@ class NotificationViewSet(
     permission_classes = [AllowAny]
     pagination_class = StandardLimitOffsetPagination
 
+    def get_queryset(self):
+        org = self.request.user
+        return self.queryset.filter(organization=org)
+
     def get_authenticators(self):
         external_id = self.request.headers.get("X-External-Id") if self.request else None
         if external_id is None:
@@ -89,6 +93,10 @@ class BroadcastViewSet(
     queryset = Broadcast.objects.all()
     serializer_class = BroadcastSerializer
     authentication_classes = [ServerAuth]
+
+    def get_queryset(self):
+        org = self.request.user
+        return self.queryset.filter(organization=org)
 
     def create(self, request, *args, **kwargs):
         broadcast_id = uuid.uuid4()

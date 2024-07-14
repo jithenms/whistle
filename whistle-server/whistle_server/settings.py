@@ -49,6 +49,7 @@ INSTALLED_APPS = [
     "organization",
     "user",
     "realtime",
+    "audience",
     "daphne",
     "django.contrib.admin",
     "django.contrib.auth",

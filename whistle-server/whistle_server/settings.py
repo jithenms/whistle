@@ -15,6 +15,7 @@ import os
 from socket import gethostbyname, gethostname
 from pathlib import Path
 
+import sentry_sdk
 from dotenv import load_dotenv, find_dotenv
 
 load_dotenv(find_dotenv())
@@ -27,6 +28,17 @@ SECRET_KEY = os.environ['DJANGO_SECRET_KEY']
 
 ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", ',').split(",")
 ALLOWED_HOSTS.append(gethostbyname(gethostname()))
+
+ENVIRONMENT = os.environ.get("ENVIRONMENT")
+SENTRY_DSN = os.environ.get("SENTRY_DSN")
+
+if ENVIRONMENT and SENTRY_DSN:
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        traces_sample_rate=0.25 if ENVIRONMENT == "PROD" else 1.0,
+        profiles_sample_rate=0.10 if ENVIRONMENT == "PROD" else 1.0,
+        environment=ENVIRONMENT,
+    )
 
 INSTALLED_APPS = [
     "connector",
@@ -46,7 +58,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "rest_framework",
     "channels",
-    'health_check', 
+    'health_check',
     'drf_spectacular'
 ]
 

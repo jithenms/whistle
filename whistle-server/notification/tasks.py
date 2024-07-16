@@ -1,9 +1,10 @@
-import datetime
+from datetime import datetime, timezone
 import logging
 
 from asgiref.sync import async_to_sync
 from celery import chord
 from channels.layers import get_channel_layer
+from django.conf import settings
 from django.db import DatabaseError
 from python_http_client import HTTPError
 from sendgrid import SendGridAPIClient, Email, To, Content, Mail
@@ -24,21 +25,147 @@ def send_broadcast(broadcast_id, org_id, data):
     tasks = []
     recipient_ids = set()
 
+    if "filters" in data:
+        recipients_to_remove = []
+        for recipient in data["recipients"]:
+            recipient_entity = update_or_create_external_user(
+                broadcast_id, org_id, recipient, data
+            )
+            for _filter in data["filters"]:
+                match _filter["operator"]:
+                    case "=":
+                        basic_fields = {
+                            "email",
+                            "phone",
+                            "first_name",
+                            "last_name",
+                            "external_id",
+                        }
+                        if _filter["property"] in basic_fields:
+                            metadata = recipient_entity.metadata
+                            if not metadata or not metadata.get(_filter["property"]):
+                                recipients_to_remove.append(recipient)
+                            try:
+                                if datetime.strptime(
+                                    getattr(recipient_entity, _filter["property"]),
+                                    settings.DATETIME_FORMAT,
+                                ) != datetime.strptime(_filter["value"]):
+                                    recipients_to_remove.append(recipient)
+                            except ValueError:
+                                if (
+                                    getattr(recipient_entity, _filter["property"])
+                                    != _filter["value"]
+                                ):
+                                    recipients_to_remove.append(recipient)
+                    case ">":
+                        metadata = recipient_entity.metadata
+                        if not metadata or not metadata.get(_filter["property"]):
+                            recipients_to_remove.append(recipient)
+                        else:
+                            try:
+                                if datetime.strptime(
+                                    metadata.get(_filter["property"]),
+                                    settings.DATETIME_FORMAT,
+                                ) <= datetime.strptime(_filter["value"]):
+                                    recipients_to_remove.append(recipient)
+                            except ValueError:
+                                if (
+                                    metadata.get(_filter["property"])
+                                    <= _filter["value"]
+                                ):
+                                    recipients_to_remove.append(recipient)
+                    case "<":
+                        metadata = recipient_entity.metadata
+                        if not metadata or not metadata.get(_filter["property"]):
+                            recipients_to_remove.append(recipient)
+                        else:
+                            try:
+                                if datetime.strptime(
+                                    metadata.get(_filter["property"]),
+                                    settings.DATETIME_FORMAT,
+                                ) >= datetime.strptime(_filter["value"]):
+                                    recipients_to_remove.append(recipient)
+                            except ValueError:
+                                if (
+                                    metadata.get(_filter["property"])
+                                    >= _filter["value"]
+                                ):
+                                    recipients_to_remove.append(recipient)
+                    case ">=":
+                        metadata = recipient_entity.metadata
+                        if not metadata or not metadata.get(_filter["property"]):
+                            recipients_to_remove.append(recipient)
+                        else:
+                            try:
+                                if datetime.strptime(
+                                    metadata.get(_filter["property"]),
+                                    settings.DATETIME_FORMAT,
+                                ) < datetime.strptime(_filter["value"]):
+                                    recipients_to_remove.append(recipient)
+                            except ValueError:
+                                if metadata.get(_filter["property"]) < _filter["value"]:
+                                    recipients_to_remove.append(recipient)
+                    case "<=":
+                        metadata = recipient_entity.metadata
+                        if not metadata or not metadata.get(_filter["property"]):
+                            recipients_to_remove.append(recipient)
+                        else:
+                            try:
+                                if datetime.strptime(
+                                    metadata.get(_filter["property"]),
+                                    settings.DATETIME_FORMAT,
+                                ) > datetime.strptime(_filter["value"]):
+                                    recipients_to_remove.append(recipient)
+                            except ValueError:
+                                if metadata.get(_filter["property"]) > _filter["value"]:
+                                    recipients_to_remove.append(recipient)
+                    case "includes":
+                        metadata = recipient_entity.metadata
+                        if not metadata or not metadata.get(_filter["property"]):
+                            recipients_to_remove.append(recipient)
+                        elif isinstance(
+                            metadata.get(_filter["property"]), str
+                        ) and _filter["value"] not in metadata.get(
+                            _filter["property"], ""
+                        ):
+                            recipients_to_remove.append(recipient)
+                        elif isinstance(
+                            metadata.get(_filter["property"]), list
+                        ) and _filter["value"] not in metadata.get(
+                            _filter["property"], []
+                        ):
+                            recipients_to_remove.append(recipient)
+                    case _:
+                        logging.debug(
+                            "Broadcast: %s with org: %s passed unsupported operator: %s",
+                            _filter["operator"],
+                        )
+        for recipient in recipients_to_remove:
+            data["recipients"].remove(recipient)
+
+    logging.info(data["recipients"])
+
     for recipient in data["recipients"]:
         try:
             recipient_entity = update_or_create_external_user(
                 broadcast_id, org_id, recipient, data
             )
-            tasks.append(handle_recipient.s(broadcast_id, org_id, recipient_entity.id, data))
+            tasks.append(
+                handle_recipient.s(broadcast_id, org_id, recipient_entity.id, data)
+            )
             recipient_ids.add(recipient_entity.id)
         except NotificationException:
             continue
     if "topic" in data:
-        subscribers = ExternalUserSubscription.objects.filter(organization_id=org_id, topic=data["topic"])
+        subscribers = ExternalUserSubscription.objects.filter(
+            organization_id=org_id, topic=data["topic"]
+        )
 
         for subscriber in subscribers:
             if subscriber.id not in recipient_ids:
-                tasks.append(handle_topic_subscriber.s(broadcast_id, org_id, subscriber, data))
+                tasks.append(
+                    handle_topic_subscriber.s(broadcast_id, org_id, subscriber, data)
+                )
 
     result = chord(tasks)(update_broadcast.s(broadcast_id, org_id, data))
 
@@ -53,7 +180,7 @@ def handle_recipient(broadcast_id, org_id, recipient_id, data):
         if "category" in data:
             preference = ExternalUserPreference.objects.prefetch_related(
                 "channels"
-            ).filter(user_id=recipient.id, slug=data['category'])
+            ).filter(user_id=recipient.id, slug=data["category"])
 
             if preference:
                 route_notification_with_preference(
@@ -80,15 +207,17 @@ def handle_topic_subscriber(broadcast_id, org_id, subscriber_id, data):
         subscriber = ExternalUserSubscription.objects.get(pk=subscriber_id)
 
         if "category" in data:
-            subscriber_category = subscriber.categories.filter(
-                slug=data["category"]
-            )
+            subscriber_category = subscriber.categories.filter(slug=data["category"])
 
             preference = ExternalUserPreference.objects.prefetch_related(
                 "channels"
             ).filter(user_id=subscriber.user.id, slug=data["category"])
 
-            if subscriber_category and preference and subscriber_category.first().enabled:
+            if (
+                subscriber_category
+                and preference
+                and subscriber_category.first().enabled
+            ):
                 route_notification_with_preference(
                     broadcast_id,
                     org_id,
@@ -135,7 +264,9 @@ def send_sms(broadcast_id, org_id, user_id, data):
         )
     except Twilio.DoesNotExist:
         logging.error(
-            "Twilio account not connected for org: %s for broadcast: %s", org_id, broadcast_id
+            "Twilio account not connected for org: %s for broadcast: %s",
+            org_id,
+            broadcast_id,
         )
         raise NotificationException(
             "Twilio account not connected", "twilio_account_not_connected"
@@ -179,7 +310,9 @@ def send_email(broadcast_id, org_id, user_id, data):
         )
     except Sendgrid.DoesNotExist:
         logging.error(
-            "Sendgrid account not connected for org: %s for broadcast: %s", org_id, broadcast_id
+            "Sendgrid account not connected for org: %s for broadcast: %s",
+            org_id,
+            broadcast_id,
         )
         raise NotificationException(
             "Sendgrid account not connected", "sendgrid_account_not_connected"
@@ -233,14 +366,19 @@ def send_web(notification_id, broadcast_id, org_id, user_id, data):
 @app.task(throws=(DatabaseError,))
 def persist_notification(broadcast_id, org_id, user_id, data, **kwargs):
     data.pop("channels")
-    data.pop('recipients')
+    data.pop("recipients")
     try:
-        notification = Notification.objects.create(organization_id=org_id, recipient_id=user_id,
-                                                   category=data.get('category', ""), topic=data.get('topic', ""),
-                                                   title=data.get('title', ""),
-                                                   content=data.get('content', ""),
-                                                   action_link=data.get('action_link', ""),
-                                                   additional_info=data.get('additional_info'), **kwargs)
+        notification = Notification.objects.create(
+            organization_id=org_id,
+            recipient_id=user_id,
+            category=data.get("category", ""),
+            topic=data.get("topic", ""),
+            title=data.get("title", ""),
+            content=data.get("content", ""),
+            action_link=data.get("action_link", ""),
+            additional_info=data.get("additional_info"),
+            **kwargs,
+        )
 
         logging.info(
             "Notification record with id: %s persisted for user: %s and org: %s for broadcast: %s",
@@ -368,13 +506,11 @@ def route_notification_with_preference(broadcast_id, org_id, recipient, channels
     )
     web_preference_entity = channels.get(slug="web")
     if web_preference_entity.enabled:
-        persist_notification.apply_async((broadcast_id, org_id, recipient.id, data),
-                                         sent_at=datetime.datetime.now(datetime.timezone.utc), link=send_web.s(
-                broadcast_id,
-                org_id,
-                recipient.id,
-                data
-            ))
+        persist_notification.apply_async(
+            (broadcast_id, org_id, recipient.id, data),
+            sent_at=datetime.now(timezone.utc),
+            link=send_web.s(broadcast_id, org_id, recipient.id, data),
+        )
     else:
         logging.info(
             "Web push disabled for category %s for user: %s in org: %s for broadcast: %s",
@@ -418,13 +554,11 @@ def route_basic_notification(broadcast_id, org_id, recipient, data):
         org_id,
         broadcast_id,
     )
-    persist_notification.apply_async((broadcast_id, org_id, recipient.id, data),
-                                     sent_at=datetime.datetime.now(datetime.timezone.utc), link=send_web.s(
-            broadcast_id,
-            org_id,
-            recipient.id,
-            data
-        ))
+    persist_notification.apply_async(
+        (broadcast_id, org_id, recipient.id, data),
+        sent_at=datetime.now(timezone.utc),
+        link=send_web.s(broadcast_id, org_id, recipient.id, data),
+    )
     if "channels" in data:
         if "sms" in data["channels"] and recipient.phone is not None:
             send_sms.delay(broadcast_id, org_id, recipient.id, data)

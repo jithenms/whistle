@@ -1,5 +1,6 @@
 from rest_framework import serializers
 
+from audience.serializers import FilterSerializer
 from external_user.serializers import ExternalUserSerializer
 from notification.models import (
     Notification,
@@ -65,6 +66,8 @@ class NotificationSerializer(serializers.ModelSerializer):
 class BroadcastSerializer(serializers.ModelSerializer):
     id = serializers.UUIDField()
     recipients = ExternalUserSerializer(many=True)
+    audience_id = serializers.UUIDField(required=False, write_only=True)
+    filters = FilterSerializer(many=True, required=False, write_only=True)
     channels = NotificationChannelsSerializer(required=False)
     additional_info = serializers.JSONField(required=False)
 
@@ -73,6 +76,8 @@ class BroadcastSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "recipients",
+            "audience_id",
+            "filters",
             "category",
             "topic",
             "channels",
@@ -87,9 +92,15 @@ class BroadcastSerializer(serializers.ModelSerializer):
     def create(self, validated_data, **kwargs):
         org = self.context["request"].user
         validated_data["organization"] = org
+
         validated_data.pop("recipients")
         if "channels" in validated_data:
             validated_data.pop("channels")
+        if "filters" in validated_data:
+            validated_data.pop("filters")
+        if "audience_id" in validated_data:
+            validated_data.pop("audience_id")
+
         instance = Broadcast(**validated_data, **kwargs)
         instance.save()
         return instance

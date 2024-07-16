@@ -25,4 +25,4 @@ class Filter(models.Model):
     audience = models.ForeignKey(Audience, on_delete=models.CASCADE, related_name='filters')
     property = models.CharField(max_length=255)
     operator = models.CharField(choices=OperatorChoices.choices, max_length=255)
-    value = models.CharField(max_length=255)
+    value = models.JSONField()

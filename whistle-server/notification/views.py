@@ -42,19 +42,25 @@ class NotificationViewSet(
         return self.queryset.filter(organization=org)
 
     def get_authenticators(self):
-        external_id = self.request.headers.get("X-External-Id") if self.request else None
+        external_id = (
+            self.request.headers.get("X-External-Id") if self.request else None
+        )
         if external_id is None:
             return [ServerAuth()]
         return super(NotificationViewSet, self).get_authenticators()
 
     def get_permissions(self):
-        external_id = self.request.headers.get("X-External-Id") if self.request else None
+        external_id = (
+            self.request.headers.get("X-External-Id") if self.request else None
+        )
         if external_id is not None:
             return [IsValidExternalId()]
         return [AllowAny()]
 
     def get_queryset(self):
-        external_id = self.request.headers.get("X-External-Id") if self.request else None
+        external_id = (
+            self.request.headers.get("X-External-Id") if self.request else None
+        )
         if external_id is not None:
             try:
                 user = ExternalUser.objects.get(external_id=external_id)
@@ -74,10 +80,18 @@ class NotificationViewSet(
 
     @extend_schema(
         parameters=[
-            OpenApiParameter(name='X-External-Id', type=str, location=OpenApiParameter.HEADER,
-                             description='External ID'),
-            OpenApiParameter(name='X-External-Id-Hmac', type=str, location=OpenApiParameter.HEADER,
-                             description='External ID HMAC')
+            OpenApiParameter(
+                name="X-External-Id",
+                type=str,
+                location=OpenApiParameter.HEADER,
+                description="External ID",
+            ),
+            OpenApiParameter(
+                name="X-External-Id-Hmac",
+                type=str,
+                location=OpenApiParameter.HEADER,
+                description="External ID HMAC",
+            ),
         ]
     )
     def list(self, request):
@@ -100,11 +114,13 @@ class BroadcastViewSet(
 
     def create(self, request, *args, **kwargs):
         broadcast_id = uuid.uuid4()
-        serializer = self.get_serializer(data={'id': broadcast_id, **request.data})
+        serializer = self.get_serializer(data={"id": broadcast_id, **request.data})
         serializer.is_valid(raise_exception=True)
         instance = serializer.save(status="queued")
         try:
-            send_broadcast.delay(broadcast_id, self.request.user.id, serializer.validated_data)
+            send_broadcast.delay(
+                broadcast_id, self.request.user.id, serializer.validated_data
+            )
             logging.info(
                 "Broadcast queued with id: %s for org: %s",
                 broadcast_id,
@@ -121,7 +137,9 @@ class BroadcastViewSet(
         response_data = serializer.validated_data
         if "channels" in response_data:
             response_data.pop("channels")
+        if "filters" in response_data:
+            response_data.pop("filters")
         return JsonResponse(
-            {**response_data, 'status': instance.status},
+            {**response_data, "status": instance.status},
             status=status.HTTP_200_OK,
         )

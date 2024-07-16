@@ -11,6 +11,7 @@ from sendgrid import SendGridAPIClient, Email, To, Content, Mail
 from twilio.base.exceptions import TwilioRestException
 from twilio.rest import Client
 
+from audience.models import Audience
 from connector.models import Twilio, Sendgrid
 from external_user.models import ExternalUser
 from notification.models import Notification, Broadcast
@@ -19,143 +20,65 @@ from subscription.models import ExternalUserSubscription
 from whistle_server.celery import app
 from whistle_server.exceptions import NotificationException
 
+basic_fields = {
+    "email",
+    "phone",
+    "first_name",
+    "last_name",
+    "external_id",
+}
+
 
 @app.task
 def send_broadcast(broadcast_id, org_id, data):
     tasks = []
     recipient_ids = set()
 
-    if "filters" in data:
-        recipients_to_remove = []
+    if "audience_id" in data:
+        audience = Audience.objects.prefetch_related("filters").filter(
+            organization_id=org_id, id=data["audience_id"]
+        )
+        # todo combine on demand filters with audience saved filters
+        filters = audience.first().filters.all()
+        query_kwargs = build_users_query_kwargs(audience, broadcast_id, filters, org_id)
+        recipients = ExternalUser.objects.filter(organization_id=org_id, **query_kwargs)
+        logging.info(recipients)
+        for recipient in recipients:
+            try:
+                tasks.append(
+                    handle_recipient.s(broadcast_id, org_id, recipient.id, data)
+                )
+                recipient_ids.add(recipient.id)
+            except NotificationException:
+                continue
+    elif "recipients" in data:
+        if "filters" in data:
+            recipients_to_remove = []
+            for recipient in data["recipients"]:
+                recipient_entity = update_or_create_external_user(
+                    broadcast_id, org_id, recipient, data
+                )
+                for filter_input in data["filters"]:
+                    filtered = apply_filter_to_recipient(
+                        broadcast_id, org_id, filter_input, recipient_entity
+                    )
+                    if filtered:
+                        recipients_to_remove.append(recipient)
+            for recipient in recipients_to_remove:
+                data["recipients"].remove(recipient)
+
         for recipient in data["recipients"]:
-            recipient_entity = update_or_create_external_user(
-                broadcast_id, org_id, recipient, data
-            )
-            for _filter in data["filters"]:
-                match _filter["operator"]:
-                    case "=":
-                        basic_fields = {
-                            "email",
-                            "phone",
-                            "first_name",
-                            "last_name",
-                            "external_id",
-                        }
-                        if _filter["property"] in basic_fields:
-                            metadata = recipient_entity.metadata
-                            if not metadata or not metadata.get(_filter["property"]):
-                                recipients_to_remove.append(recipient)
-                            try:
-                                if datetime.strptime(
-                                    getattr(recipient_entity, _filter["property"]),
-                                    settings.DATETIME_FORMAT,
-                                ) != datetime.strptime(_filter["value"]):
-                                    recipients_to_remove.append(recipient)
-                            except ValueError:
-                                if (
-                                    getattr(recipient_entity, _filter["property"])
-                                    != _filter["value"]
-                                ):
-                                    recipients_to_remove.append(recipient)
-                    case ">":
-                        metadata = recipient_entity.metadata
-                        if not metadata or not metadata.get(_filter["property"]):
-                            recipients_to_remove.append(recipient)
-                        else:
-                            try:
-                                if datetime.strptime(
-                                    metadata.get(_filter["property"]),
-                                    settings.DATETIME_FORMAT,
-                                ) <= datetime.strptime(_filter["value"]):
-                                    recipients_to_remove.append(recipient)
-                            except ValueError:
-                                if (
-                                    metadata.get(_filter["property"])
-                                    <= _filter["value"]
-                                ):
-                                    recipients_to_remove.append(recipient)
-                    case "<":
-                        metadata = recipient_entity.metadata
-                        if not metadata or not metadata.get(_filter["property"]):
-                            recipients_to_remove.append(recipient)
-                        else:
-                            try:
-                                if datetime.strptime(
-                                    metadata.get(_filter["property"]),
-                                    settings.DATETIME_FORMAT,
-                                ) >= datetime.strptime(_filter["value"]):
-                                    recipients_to_remove.append(recipient)
-                            except ValueError:
-                                if (
-                                    metadata.get(_filter["property"])
-                                    >= _filter["value"]
-                                ):
-                                    recipients_to_remove.append(recipient)
-                    case ">=":
-                        metadata = recipient_entity.metadata
-                        if not metadata or not metadata.get(_filter["property"]):
-                            recipients_to_remove.append(recipient)
-                        else:
-                            try:
-                                if datetime.strptime(
-                                    metadata.get(_filter["property"]),
-                                    settings.DATETIME_FORMAT,
-                                ) < datetime.strptime(_filter["value"]):
-                                    recipients_to_remove.append(recipient)
-                            except ValueError:
-                                if metadata.get(_filter["property"]) < _filter["value"]:
-                                    recipients_to_remove.append(recipient)
-                    case "<=":
-                        metadata = recipient_entity.metadata
-                        if not metadata or not metadata.get(_filter["property"]):
-                            recipients_to_remove.append(recipient)
-                        else:
-                            try:
-                                if datetime.strptime(
-                                    metadata.get(_filter["property"]),
-                                    settings.DATETIME_FORMAT,
-                                ) > datetime.strptime(_filter["value"]):
-                                    recipients_to_remove.append(recipient)
-                            except ValueError:
-                                if metadata.get(_filter["property"]) > _filter["value"]:
-                                    recipients_to_remove.append(recipient)
-                    case "includes":
-                        metadata = recipient_entity.metadata
-                        if not metadata or not metadata.get(_filter["property"]):
-                            recipients_to_remove.append(recipient)
-                        elif isinstance(
-                            metadata.get(_filter["property"]), str
-                        ) and _filter["value"] not in metadata.get(
-                            _filter["property"], ""
-                        ):
-                            recipients_to_remove.append(recipient)
-                        elif isinstance(
-                            metadata.get(_filter["property"]), list
-                        ) and _filter["value"] not in metadata.get(
-                            _filter["property"], []
-                        ):
-                            recipients_to_remove.append(recipient)
-                    case _:
-                        logging.debug(
-                            "Broadcast: %s with org: %s passed unsupported operator: %s",
-                            _filter["operator"],
-                        )
-        for recipient in recipients_to_remove:
-            data["recipients"].remove(recipient)
+            try:
+                recipient_entity = update_or_create_external_user(
+                    broadcast_id, org_id, recipient, data
+                )
+                tasks.append(
+                    handle_recipient.s(broadcast_id, org_id, recipient_entity.id, data)
+                )
+                recipient_ids.add(recipient_entity.id)
+            except NotificationException:
+                continue
 
-    logging.info(data["recipients"])
-
-    for recipient in data["recipients"]:
-        try:
-            recipient_entity = update_or_create_external_user(
-                broadcast_id, org_id, recipient, data
-            )
-            tasks.append(
-                handle_recipient.s(broadcast_id, org_id, recipient_entity.id, data)
-            )
-            recipient_ids.add(recipient_entity.id)
-        except NotificationException:
-            continue
     if "topic" in data:
         subscribers = ExternalUserSubscription.objects.filter(
             organization_id=org_id, topic=data["topic"]
@@ -170,6 +93,139 @@ def send_broadcast(broadcast_id, org_id, data):
     result = chord(tasks)(update_broadcast.s(broadcast_id, org_id, data))
 
     return result.id
+
+
+def build_users_query_kwargs(audience, broadcast_id, filters, org_id):
+    query_kwargs = {}
+    for filter_rec in filters:
+        match filter_rec.operator:
+            case "=":
+                if filter_rec.property in basic_fields:
+                    query_kwargs[filter_rec.property] = filter_rec.value
+                else:
+                    query_kwargs[f"metadata__{filter_rec.property}"] = filter_rec.value
+            case ">":
+                query_kwargs[f"metadata__{filter_rec.property}__gt"] = filter_rec.value
+            case "<":
+                query_kwargs[f"metadata__{filter_rec.property}__lt"] = filter_rec.value
+            case ">=":
+                query_kwargs[f"metadata__{filter_rec.property}__gte"] = filter_rec.value
+            case "<=":
+                query_kwargs[f"metadata__{filter_rec.property}__lte"] = filter_rec.value
+            case "contains":
+                query_kwargs[f"metadata__{filter_rec.property}__contains"] = (
+                    filter_rec.value
+                )
+            case _:
+                logging.debug(
+                    "Broadcast: %s with org: %s passed unsupported operator: %s for audience with id: %s",
+                    broadcast_id,
+                    org_id,
+                    filter_rec.operator,
+                    audience.id,
+                )
+    return query_kwargs
+
+
+def apply_filter_to_recipient(broadcast_id, org_id, filter_input, recipient_entity):
+    match filter_input["operator"]:
+        case "=":
+            if filter_input["property"] in basic_fields:
+                metadata = recipient_entity.metadata
+                if not metadata or not metadata.get(filter_input["property"]):
+                    return True
+                try:
+                    if datetime.strptime(
+                        getattr(recipient_entity, filter_input["property"]),
+                        settings.DATETIME_FORMAT,
+                    ) != datetime.strptime(filter_input["value"]):
+                        return True
+                except ValueError:
+                    if (
+                        getattr(recipient_entity, filter_input["property"])
+                        != filter_input["value"]
+                    ):
+                        return True
+        case ">":
+            metadata = recipient_entity.metadata
+            if not metadata or not metadata.get(filter_input["property"]):
+                return True
+            else:
+                try:
+                    if datetime.strptime(
+                        metadata.get(filter_input["property"]),
+                        settings.DATETIME_FORMAT,
+                    ) <= datetime.strptime(filter_input["value"]):
+                        return True
+                except ValueError:
+                    if metadata.get(filter_input["property"]) <= filter_input["value"]:
+                        return True
+        case "<":
+            metadata = recipient_entity.metadata
+            if not metadata or not metadata.get(filter_input["property"]):
+                return True
+            else:
+                try:
+                    if datetime.strptime(
+                        metadata.get(filter_input["property"]),
+                        settings.DATETIME_FORMAT,
+                    ) >= datetime.strptime(filter_input["value"]):
+                        return True
+                except ValueError:
+                    if metadata.get(filter_input["property"]) >= filter_input["value"]:
+                        return True
+        case ">=":
+            metadata = recipient_entity.metadata
+            if not metadata or not metadata.get(filter_input["property"]):
+                return True
+            else:
+                try:
+                    if datetime.strptime(
+                        metadata.get(filter_input["property"]),
+                        settings.DATETIME_FORMAT,
+                    ) < datetime.strptime(filter_input["value"]):
+                        return True
+                except ValueError:
+                    if metadata.get(filter_input["property"]) < filter_input["value"]:
+                        return True
+        case "<=":
+            metadata = recipient_entity.metadata
+            if not metadata or not metadata.get(filter_input["property"]):
+                return True
+            else:
+                try:
+                    if datetime.strptime(
+                        metadata.get(filter_input["property"]),
+                        settings.DATETIME_FORMAT,
+                    ) > datetime.strptime(filter_input["value"]):
+                        return True
+                except ValueError:
+                    if metadata.get(filter_input["property"]) > filter_input["value"]:
+                        return True
+        case "contains":
+            metadata = recipient_entity.metadata
+            if not metadata or not metadata.get(filter_input["property"]):
+                return True
+            elif isinstance(
+                metadata.get(filter_input["property"]), str
+            ) and filter_input["value"] not in metadata.get(
+                filter_input["property"], ""
+            ):
+                return True
+            elif isinstance(
+                metadata.get(filter_input["property"]), list
+            ) and filter_input["value"] not in metadata.get(
+                filter_input["property"], []
+            ):
+                return True
+        case _:
+            logging.debug(
+                "Broadcast: %s with org: %s passed unsupported operator: %s",
+                broadcast_id,
+                org_id,
+                filter_input["operator"],
+            )
+    return False
 
 
 @app.task
@@ -365,8 +421,10 @@ def send_web(notification_id, broadcast_id, org_id, user_id, data):
 
 @app.task(throws=(DatabaseError,))
 def persist_notification(broadcast_id, org_id, user_id, data, **kwargs):
-    data.pop("channels")
-    data.pop("recipients")
+    if "channels" in data:
+        data.pop("channels")
+    if "recipients" in data:
+        data.pop("recipients")
     try:
         notification = Notification.objects.create(
             organization_id=org_id,
@@ -424,8 +482,10 @@ def persist_notification(broadcast_id, org_id, user_id, data, **kwargs):
 
 @app.task(throws=(DatabaseError,))
 def update_broadcast(delivered_to, broadcast_id, org_id, data):
-    data.pop("channels")
-    data.pop("recipients")
+    if "channels" in data:
+        data.pop("channels")
+    if "recipients" in data:
+        data.pop("recipients")
     try:
         broadcast = Broadcast.objects.get(pk=broadcast_id)
         broadcast.status = "processed"

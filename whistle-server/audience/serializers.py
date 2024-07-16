@@ -9,12 +9,7 @@ from audience.models import Audience, Filter
 class FilterSerializer(serializers.ModelSerializer):
     class Meta:
         model = Filter
-        fields = [
-            "id",
-            "property",
-            "operator",
-            "value"
-        ]
+        fields = ["property", "operator", "value"]
 
 
 class AudienceSerializer(serializers.ModelSerializer):
@@ -22,27 +17,28 @@ class AudienceSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Audience
-        fields = [
-            "id",
-            "name",
-            "description",
-            "filters"
-        ]
+        fields = ["id", "name", "description", "filters"]
 
     def create(self, validated_data):
-        org = self.context['request'].user
+        org = self.context["request"].user
         try:
             with transaction.atomic():
-                instance = Audience(organization=org,
-                                    name=validated_data.get("name", ""),
-                                    description=validated_data.get("description", ""))
+                instance = Audience(
+                    organization=org,
+                    name=validated_data.get("name", ""),
+                    description=validated_data.get("description", ""),
+                )
                 instance.save()
-                for _filter in validated_data['filters']:
+                for _filter in validated_data["filters"]:
                     Filter.objects.create(audience=instance, **_filter)
-                logging.info("Audience with id: %s created for org: %s", instance.id, org.id)
+                logging.info(
+                    "Audience with id: %s created for org: %s", instance.id, org.id
+                )
                 return instance
         except DatabaseError as error:
-            logging.error("Failed to create audience for org: %s with error: %s", org.id, error)
+            logging.error(
+                "Failed to create audience for org: %s with error: %s", org.id, error
+            )
             raise
 
     def update(self, instance, validated_data, **kwargs):
@@ -50,22 +46,31 @@ class AudienceSerializer(serializers.ModelSerializer):
         try:
             with transaction.atomic():
                 instance.name = validated_data.get("name", instance.name)
-                instance.description = validated_data.get("description", instance.description)
+                instance.description = validated_data.get(
+                    "description", instance.description
+                )
 
                 if self.partial:
-                    for _filter in validated_data['filters']:
-                        Filter.objects.update_or_create(audience=instance, property=_filter.get("property"),
-                                                        defaults={
-                                                            'operator': _filter.get('operator'),
-                                                            'value': _filter.get('value')
-                                                        })
+                    for _filter in validated_data["filters"]:
+                        Filter.objects.update_or_create(
+                            audience=instance,
+                            property=_filter.get("property"),
+                            defaults={
+                                "operator": _filter.get("operator"),
+                                "value": _filter.get("value"),
+                            },
+                        )
                 else:
                     Filter.objects.filter(audience=instance).delete()
-                    for _filter in validated_data['filters']:
+                    for _filter in validated_data["filters"]:
                         Filter.objects.create(audience=instance, **_filter)
 
-                logging.info("Audience with id: %s updated for org: %s", instance.id, org.id)
+                logging.info(
+                    "Audience with id: %s updated for org: %s", instance.id, org.id
+                )
                 return instance
         except DatabaseError as error:
-            logging.error("Failed to update audience for org: %s with error: %s", org.id, error)
+            logging.error(
+                "Failed to update audience for org: %s with error: %s", org.id, error
+            )
             raise

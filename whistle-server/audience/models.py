@@ -17,12 +17,14 @@ class OperatorChoices(models.TextChoices):
     GREATER_THAN_EQUAL = ">=", ">="
     LESS_THAN_EQUAL = "<=", "<="
     EQUAL = "=", "="
-    INCLUDES = "includes", "includes"
+    CONTAINS = "contains", "contains"
 
 
 class Filter(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    audience = models.ForeignKey(Audience, on_delete=models.CASCADE, related_name='filters')
+    audience = models.ForeignKey(
+        Audience, on_delete=models.CASCADE, related_name="filters"
+    )
     property = models.CharField(max_length=255)
     operator = models.CharField(choices=OperatorChoices.choices, max_length=255)
     value = models.JSONField()

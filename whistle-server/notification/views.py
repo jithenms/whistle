@@ -107,6 +107,7 @@ class BroadcastViewSet(
     queryset = Broadcast.objects.all()
     serializer_class = BroadcastSerializer
     authentication_classes = [ServerAuth]
+    pagination_class = StandardLimitOffsetPagination
 
     def get_queryset(self):
         org = self.request.user

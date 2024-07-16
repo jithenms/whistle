@@ -65,7 +65,7 @@ class NotificationSerializer(serializers.ModelSerializer):
 
 class BroadcastSerializer(serializers.ModelSerializer):
     id = serializers.UUIDField()
-    recipients = ExternalUserSerializer(many=True)
+    recipients = ExternalUserSerializer(many=True, required=False)
     audience_id = serializers.UUIDField(required=False, write_only=True)
     filters = FilterSerializer(many=True, required=False, write_only=True)
     channels = NotificationChannelsSerializer(required=False)
@@ -93,7 +93,8 @@ class BroadcastSerializer(serializers.ModelSerializer):
         org = self.context["request"].user
         validated_data["organization"] = org
 
-        validated_data.pop("recipients")
+        if "recipients" in validated_data:
+            validated_data.pop("recipients")
         if "channels" in validated_data:
             validated_data.pop("channels")
         if "filters" in validated_data:

@@ -38,12 +38,10 @@ def send_broadcast(broadcast_id, org_id, data):
         audience = Audience.objects.prefetch_related("filters").filter(
             organization_id=org_id, id=data["audience_id"]
         )
-        # todo combine on demand filters with audience saved filters
         filters = audience.first().filters.all()
         query_kwargs = build_users_query_kwargs(audience, broadcast_id, filters, org_id)
         recipients = ExternalUser.objects.filter(organization_id=org_id, **query_kwargs)
-        logging.info(recipients)
-        for recipient in recipients:
+        for recipient in recipients.iterator():
             try:
                 tasks.append(
                     handle_recipient.s(broadcast_id, org_id, recipient.id, data)
@@ -51,7 +49,8 @@ def send_broadcast(broadcast_id, org_id, data):
                 recipient_ids.add(recipient.id)
             except NotificationException:
                 continue
-    elif "recipients" in data:
+
+    if "recipients" in data:
         if "filters" in data:
             recipients_to_remove = []
             for recipient in data["recipients"]:
@@ -72,10 +71,13 @@ def send_broadcast(broadcast_id, org_id, data):
                 recipient_entity = update_or_create_external_user(
                     broadcast_id, org_id, recipient, data
                 )
-                tasks.append(
-                    handle_recipient.s(broadcast_id, org_id, recipient_entity.id, data)
-                )
-                recipient_ids.add(recipient_entity.id)
+                if recipient_entity.id not in recipient_ids:
+                    tasks.append(
+                        handle_recipient.s(
+                            broadcast_id, org_id, recipient_entity.id, data
+                        )
+                    )
+                    recipient_ids.add(recipient_entity.id)
             except NotificationException:
                 continue
 

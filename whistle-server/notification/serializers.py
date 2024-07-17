@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from rest_framework.exceptions import ValidationError
 
 from audience.serializers import FilterSerializer
 from external_user.serializers import ExternalUserSerializer
@@ -92,6 +93,12 @@ class BroadcastSerializer(serializers.ModelSerializer):
     def create(self, validated_data, **kwargs):
         org = self.context["request"].user
         validated_data["organization"] = org
+
+        if "audience_id" in validated_data and "filters" in validated_data:
+            raise ValidationError(
+                "Cannot use both 'audience_id' and 'filters' together. Please specify only one.",
+                "audience_and_filters_unsupported",
+            )
 
         if "recipients" in validated_data:
             validated_data.pop("recipients")

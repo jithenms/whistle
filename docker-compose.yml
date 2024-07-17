@@ -4,6 +4,7 @@ services:
       context: .
       dockerfile: ./whistle-server/Dockerfile
     entrypoint: /usr/local/bin/start-api.sh
+    command: --workers=1
     ports:
       - 8080:8080
     env_file:
@@ -30,7 +31,7 @@ services:
       context: .
       dockerfile: ./whistle-server/Dockerfile
     entrypoint: /usr/local/bin/start-worker.sh
-    command: --loglevel=DEBUG
+    command: --concurrency=1 --loglevel=DEBUG
     env_file:
       - ./whistle-server/whistle_server/.env
     depends_on:

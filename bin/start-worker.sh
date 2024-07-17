@@ -1,5 +1,3 @@
 #!/bin/bash
 
-celery -A whistle_server worker
-
-wait
+celery -A whistle_server worker "$@"

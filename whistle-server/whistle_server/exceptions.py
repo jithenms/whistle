@@ -21,7 +21,7 @@ class NotificationException(Exception):
 def custom_exception_handler(exc, context):
     response = exception_handler(exc, context)
 
-    logging.debug(exc)
+    logging.info(exc)
 
     if response is not None:
         if isinstance(exc, AuthenticationFailed):
@@ -60,6 +60,16 @@ def custom_exception_handler(exc, context):
             response.status_code = status.HTTP_404_NOT_FOUND
             return response
 
+    if isinstance(exc, IntegrityError):
+        if "unique constraint" in str(exc):
+            return generate_error_response(
+                "data_integrity_error",
+                "unique_constraint_error",
+                status.HTTP_400_BAD_REQUEST,
+                "The record you are trying to create violates a unique constraint. Please ensure your request does not "
+                "contain existing identifiers or slugs.",
+            )
+
     return generate_error_response(
         "server_error",
         "internal_error",
@@ -73,8 +83,7 @@ def generate_error_response(
     code="invalid",
     status_code=status.HTTP_400_BAD_REQUEST,
     detail=None,
-    attr=None,
 ):
     return JsonResponse(
-        {"type": type, "code": code, "detail": detail, "attr": attr}, status=status_code
+        {"type": type, "code": code, "detail": detail}, status=status_code
     )

@@ -13,6 +13,9 @@ class ExternalUserPreference(models.Model):
     user = models.ForeignKey(ExternalUser, on_delete=models.CASCADE)
     slug = models.SlugField()
 
+    class Meta:
+        unique_together = [["organization", "slug"]]
+
 
 class ChannelChoices(models.TextChoices):
     WEB = "WEB", "WEB"

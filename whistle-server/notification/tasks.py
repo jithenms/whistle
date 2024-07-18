@@ -11,7 +11,7 @@ from sendgrid import SendGridAPIClient, Email, To, Content, Mail
 from twilio.base.exceptions import TwilioRestException
 from twilio.rest import Client
 
-from audience.models import Audience
+from audience.models import Audience, OperatorChoices
 from connector.models import Twilio, Sendgrid
 from external_user.models import ExternalUser
 from notification.models import Notification, Broadcast
@@ -39,8 +39,15 @@ def send_broadcast(broadcast_id, org_id, data):
             organization_id=org_id, id=data["audience_id"]
         )
         filters = audience.first().filters.all()
-        query_kwargs = build_users_query_kwargs(audience, broadcast_id, filters, org_id)
-        recipients = ExternalUser.objects.filter(organization_id=org_id, **query_kwargs)
+        filter_kwargs = build_filter_kwargs(filters)
+        exclude_kwargs = build_exclude_kwargs(filters)
+
+        recipients = ExternalUser.objects.filter(
+            organization_id=org_id, **filter_kwargs
+        ).exclude(**exclude_kwargs)
+
+        logging.info(f"Recipients: {recipients}")
+
         for recipient in recipients.iterator():
             try:
                 tasks.append(
@@ -49,8 +56,7 @@ def send_broadcast(broadcast_id, org_id, data):
                 recipient_ids.add(recipient.id)
             except NotificationException:
                 continue
-
-    if "recipients" in data:
+    elif "recipients" in data:
         if "filters" in data:
             recipients_to_remove = []
             for recipient in data["recipients"]:
@@ -71,13 +77,10 @@ def send_broadcast(broadcast_id, org_id, data):
                 recipient_entity = update_or_create_external_user(
                     broadcast_id, org_id, recipient, data
                 )
-                if recipient_entity.id not in recipient_ids:
-                    tasks.append(
-                        handle_recipient.s(
-                            broadcast_id, org_id, recipient_entity.id, data
-                        )
-                    )
-                    recipient_ids.add(recipient_entity.id)
+                tasks.append(
+                    handle_recipient.s(broadcast_id, org_id, recipient_entity.id, data)
+                )
+                recipient_ids.add(recipient_entity.id)
             except NotificationException:
                 continue
 
@@ -97,41 +100,53 @@ def send_broadcast(broadcast_id, org_id, data):
     return result.id
 
 
-def build_users_query_kwargs(audience, broadcast_id, filters, org_id):
+def build_filter_kwargs(filters):
     query_kwargs = {}
     for filter_rec in filters:
-        match filter_rec.operator:
-            case "=":
+        match filter_rec.operator.upper():
+            case OperatorChoices.EQ.value:
                 if filter_rec.property in basic_fields:
                     query_kwargs[filter_rec.property] = filter_rec.value
                 else:
                     query_kwargs[f"metadata__{filter_rec.property}"] = filter_rec.value
-            case ">":
+            case OperatorChoices.GT.value:
                 query_kwargs[f"metadata__{filter_rec.property}__gt"] = filter_rec.value
-            case "<":
+            case OperatorChoices.LT.value:
                 query_kwargs[f"metadata__{filter_rec.property}__lt"] = filter_rec.value
-            case ">=":
+            case OperatorChoices.GTE.value:
                 query_kwargs[f"metadata__{filter_rec.property}__gte"] = filter_rec.value
-            case "<=":
+            case OperatorChoices.LTE.value:
                 query_kwargs[f"metadata__{filter_rec.property}__lte"] = filter_rec.value
-            case "contains":
+            case OperatorChoices.CONTAINS.value:
                 query_kwargs[f"metadata__{filter_rec.property}__contains"] = (
                     filter_rec.value
                 )
             case _:
-                logging.debug(
-                    "Broadcast: %s with org: %s passed unsupported operator: %s for audience with id: %s",
-                    broadcast_id,
-                    org_id,
-                    filter_rec.operator,
-                    audience.id,
+                continue
+    return query_kwargs
+
+
+def build_exclude_kwargs(filters):
+    query_kwargs = {}
+    for filter_rec in filters:
+        match filter_rec.operator:
+            case OperatorChoices.NEQ:
+                if filter_rec.property in basic_fields:
+                    query_kwargs[filter_rec.property] = filter_rec.value
+                else:
+                    query_kwargs[f"metadata__{filter_rec.property}"] = filter_rec.value
+            case OperatorChoices.DOES_NOT_CONTAIN.value:
+                query_kwargs[f"metadata__{filter_rec.property}__contains"] = (
+                    filter_rec.value
                 )
+            case _:
+                continue
     return query_kwargs
 
 
 def apply_filter_to_recipient(broadcast_id, org_id, filter_input, recipient_entity):
     match filter_input["operator"]:
-        case "=":
+        case OperatorChoices.EQ.value:
             if filter_input["property"] in basic_fields:
                 metadata = recipient_entity.metadata
                 if not metadata or not metadata.get(filter_input["property"]):
@@ -148,7 +163,24 @@ def apply_filter_to_recipient(broadcast_id, org_id, filter_input, recipient_enti
                         != filter_input["value"]
                     ):
                         return True
-        case ">":
+        case OperatorChoices.NEQ.value:
+            if filter_input["property"] in basic_fields:
+                metadata = recipient_entity.metadata
+                if not metadata or not metadata.get(filter_input["property"]):
+                    return True
+                try:
+                    if datetime.strptime(
+                        getattr(recipient_entity, filter_input["property"]),
+                        settings.DATETIME_FORMAT,
+                    ) == datetime.strptime(filter_input["value"]):
+                        return True
+                except ValueError:
+                    if (
+                        getattr(recipient_entity, filter_input["property"])
+                        == filter_input["value"]
+                    ):
+                        return True
+        case OperatorChoices.GT.value:
             metadata = recipient_entity.metadata
             if not metadata or not metadata.get(filter_input["property"]):
                 return True
@@ -162,7 +194,7 @@ def apply_filter_to_recipient(broadcast_id, org_id, filter_input, recipient_enti
                 except ValueError:
                     if metadata.get(filter_input["property"]) <= filter_input["value"]:
                         return True
-        case "<":
+        case OperatorChoices.LT.value:
             metadata = recipient_entity.metadata
             if not metadata or not metadata.get(filter_input["property"]):
                 return True
@@ -176,7 +208,7 @@ def apply_filter_to_recipient(broadcast_id, org_id, filter_input, recipient_enti
                 except ValueError:
                     if metadata.get(filter_input["property"]) >= filter_input["value"]:
                         return True
-        case ">=":
+        case OperatorChoices.GTE.value:
             metadata = recipient_entity.metadata
             if not metadata or not metadata.get(filter_input["property"]):
                 return True
@@ -190,7 +222,7 @@ def apply_filter_to_recipient(broadcast_id, org_id, filter_input, recipient_enti
                 except ValueError:
                     if metadata.get(filter_input["property"]) < filter_input["value"]:
                         return True
-        case "<=":
+        case OperatorChoices.LTE.value:
             metadata = recipient_entity.metadata
             if not metadata or not metadata.get(filter_input["property"]):
                 return True
@@ -204,7 +236,7 @@ def apply_filter_to_recipient(broadcast_id, org_id, filter_input, recipient_enti
                 except ValueError:
                     if metadata.get(filter_input["property"]) > filter_input["value"]:
                         return True
-        case "contains":
+        case OperatorChoices.CONTAINS.value:
             metadata = recipient_entity.metadata
             if not metadata or not metadata.get(filter_input["property"]):
                 return True
@@ -219,6 +251,18 @@ def apply_filter_to_recipient(broadcast_id, org_id, filter_input, recipient_enti
             ) and filter_input["value"] not in metadata.get(
                 filter_input["property"], []
             ):
+                return True
+        case OperatorChoices.DOES_NOT_CONTAIN.value:
+            metadata = recipient_entity.metadata
+            if not metadata or not metadata.get(filter_input["property"]):
+                return True
+            elif isinstance(
+                metadata.get(filter_input["property"]), str
+            ) and filter_input["value"] in metadata.get(filter_input["property"], ""):
+                return True
+            elif isinstance(
+                metadata.get(filter_input["property"]), list
+            ) and filter_input["value"] in metadata.get(filter_input["property"], []):
                 return True
         case _:
             logging.debug(

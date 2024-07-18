@@ -15,9 +15,9 @@ class ExternalUserPreference(models.Model):
 
 
 class ChannelChoices(models.TextChoices):
-    WEB = "web", "web"
-    EMAIL = "email", "email"
-    SMS = 'sms', 'sms'
+    WEB = "WEB", "WEB"
+    EMAIL = "EMAIL", "EMAIL"
+    SMS = "SMS", "SMS"
 
 
 class ExternalUserPreferenceChannel(models.Model):

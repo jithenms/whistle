@@ -3,13 +3,23 @@ import logging
 from django.db import transaction, DatabaseError
 from rest_framework import serializers
 
-from audience.models import Audience, Filter
+from audience.models import Audience, Filter, OperatorChoices
 
 
 class FilterSerializer(serializers.ModelSerializer):
+    operator = serializers.CharField(max_length=255)
+
     class Meta:
         model = Filter
         fields = ["property", "operator", "value"]
+
+    def validate_operator(self, value):
+        # Convert input to uppercase
+        value_upper = value.upper()
+        # Check if the value is a valid choice
+        if value_upper not in OperatorChoices.values:
+            raise serializers.ValidationError(f"'{value}' is not a valid choice.")
+        return value_upper
 
 
 class AudienceSerializer(serializers.ModelSerializer):

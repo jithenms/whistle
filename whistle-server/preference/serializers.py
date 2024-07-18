@@ -9,13 +9,24 @@ from external_user.models import ExternalUser
 from preference.models import (
     ExternalUserPreferenceChannel,
     ExternalUserPreference,
+    ChannelChoices,
 )
 
 
 class ExternalUserPreferenceChannelSerializer(serializers.ModelSerializer):
+    slug = serializers.CharField(max_length=255)
+
     class Meta:
         model = ExternalUserPreferenceChannel
         fields = ["id", "slug", "enabled"]
+
+    def validate_slug(self, value):
+        # Convert input to uppercase
+        value_upper = value.upper()
+        # Check if the value is a valid choice
+        if value_upper not in ChannelChoices.values:
+            raise serializers.ValidationError(f"'{value}' is not a valid choice.")
+        return value_upper
 
 
 class ExternalUserPreferenceSerializer(serializers.ModelSerializer):
@@ -53,8 +64,12 @@ class ExternalUserPreferenceSerializer(serializers.ModelSerializer):
                         user_preference=user_preference, **channel
                     )
 
-                logging.info("Preference with id: %s created for user: %s in org: %s", user_preference.id,
-                             external_user.id, org.id)
+                logging.info(
+                    "Preference with id: %s created for user: %s in org: %s",
+                    user_preference.id,
+                    external_user.id,
+                    org.id,
+                )
 
                 return user_preference
         except ExternalUser.DoesNotExist:
@@ -78,16 +93,25 @@ class ExternalUserPreferenceSerializer(serializers.ModelSerializer):
 
             if self.partial:
                 for channel in channels_data:
-                    ExternalUserPreferenceChannel.objects.update_or_create(user_preference=instance,
-                                                                           slug=channel.get('slug'),
-                                                                           defaults={
-                                                                               'enabled': channel.get('enabled')})
+                    ExternalUserPreferenceChannel.objects.update_or_create(
+                        user_preference=instance,
+                        slug=channel.get("slug"),
+                        defaults={"enabled": channel.get("enabled")},
+                    )
             else:
-                ExternalUserPreferenceChannel.objects.filter(user_preference=instance).delete()
+                ExternalUserPreferenceChannel.objects.filter(
+                    user_preference=instance
+                ).delete()
                 for channel in channels_data:
-                    ExternalUserPreferenceChannel.objects.create(user_preference=instance, **channel)
+                    ExternalUserPreferenceChannel.objects.create(
+                        user_preference=instance, **channel
+                    )
 
-            logging.info("Preference with id: %s updated for user: %s in org: %s", instance.id, instance.user.id,
-                         org.id)
+            logging.info(
+                "Preference with id: %s updated for user: %s in org: %s",
+                instance.id,
+                instance.user.id,
+                org.id,
+            )
 
             return instance

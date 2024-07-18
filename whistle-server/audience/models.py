@@ -12,12 +12,14 @@ class Audience(models.Model):
 
 
 class OperatorChoices(models.TextChoices):
-    GREATER_THAN = ">", ">"
-    LESS_THAN = "<", "<"
-    GREATER_THAN_EQUAL = ">=", ">="
-    LESS_THAN_EQUAL = "<=", "<="
-    EQUAL = "=", "="
-    CONTAINS = "contains", "contains"
+    GT = "GT", "GT"
+    LT = "LT", "LT"
+    GTE = "GTE", "GTE"
+    LTE = "LTE", "LTE"
+    EQ = "EQ", "EQ"
+    NEQ = "NEQ", "NEQ"
+    CONTAINS = "CONTAINS", "CONTAINS"
+    DOES_NOT_CONTAIN = "DOES_NOT_CONTAIN", "DOES_NOT_CONTAIN"
 
 
 class Filter(models.Model):
@@ -28,3 +30,6 @@ class Filter(models.Model):
     property = models.CharField(max_length=255)
     operator = models.CharField(choices=OperatorChoices.choices, max_length=255)
     value = models.JSONField()
+
+    class Meta:
+        unique_together = [["audience", "property"]]

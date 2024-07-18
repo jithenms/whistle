@@ -8,6 +8,7 @@ from rest_framework.generics import CreateAPIView
 from rest_framework.permissions import AllowAny
 from rest_framework.viewsets import GenericViewSet
 
+from audience.models import Audience
 from external_user.models import ExternalUser
 from notification.models import Notification, Broadcast
 from notification.serializers import (
@@ -117,6 +118,24 @@ class BroadcastViewSet(
         broadcast_id = uuid.uuid4()
         serializer = self.get_serializer(data={"id": broadcast_id, **request.data})
         serializer.is_valid(raise_exception=True)
+
+        if "audience_id" in serializer.validated_data:
+            try:
+                Audience.objects.get(
+                    organization=request.user,
+                    pk=serializer.validated_data["audience_id"],
+                )
+            except Audience.DoesNotExist:
+                logging.error(
+                    "Invalid audience id: %s provided for org: %s",
+                    serializer.validated_data["audience_id"],
+                    request.user.id,
+                )
+                raise ValidationError(
+                    "Audience not found. Please provide a valid Audience ID.",
+                    "invalid_audience_id",
+                )
+
         instance = serializer.save(status="queued")
         try:
             send_broadcast.delay(

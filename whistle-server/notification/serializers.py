@@ -100,6 +100,12 @@ class BroadcastSerializer(serializers.ModelSerializer):
                 "audience_and_filters_unsupported",
             )
 
+        if "audience_id" in validated_data and "recipients" in validated_data:
+            raise ValidationError(
+                "Cannot use both 'audience_id' and 'recipients' together. Please specify only one.",
+                "audience_and_recipients_unsupported",
+            )
+
         if "recipients" in validated_data:
             validated_data.pop("recipients")
         if "channels" in validated_data:

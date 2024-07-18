@@ -14,7 +14,10 @@ class ExternalUserPreference(models.Model):
     slug = models.SlugField()
 
 
-CHANNELS = (("web", "web"), ("email", "email"), ("sms", "sms"))
+class ChannelChoices(models.TextChoices):
+    WEB = "WEB", "WEB"
+    EMAIL = "EMAIL", "EMAIL"
+    SMS = "SMS", "SMS"
 
 
 class ExternalUserPreferenceChannel(models.Model):
@@ -22,5 +25,5 @@ class ExternalUserPreferenceChannel(models.Model):
     user_preference = models.ForeignKey(
         ExternalUserPreference, related_name="channels", on_delete=models.CASCADE
     )
-    slug = models.SlugField(choices=CHANNELS)
+    slug = models.SlugField(choices=ChannelChoices.choices)
     enabled = models.BooleanField(default=False)

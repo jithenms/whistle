@@ -44,8 +44,8 @@ class ServerAuth(BaseAuthentication):
                 member = update_or_create_organization_member(data, user, org)
 
                 return org, None
-            except jwt.PyJWTError:
-                logging.debug("Access token invalid.")
+            except jwt.PyJWTError as error:
+                logging.debug("Access token invalid with error: %s", error)
                 raise AuthenticationFailed(
                     "The provided access token is invalid. Please provide a valid access token.",
                     "invalid_access_token",

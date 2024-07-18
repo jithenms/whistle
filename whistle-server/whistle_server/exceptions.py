@@ -1,5 +1,6 @@
 import logging
 
+from django.db import IntegrityError
 from django.http import JsonResponse, Http404
 from rest_framework import status
 from rest_framework.exceptions import (
@@ -55,7 +56,7 @@ def custom_exception_handler(exc, context):
             return response
         elif isinstance(exc, Http404):
             response.data["type"] = "not_found"
-            response.data['detail'] = "Resource not found"
+            response.data["detail"] = "Resource not found"
             response.status_code = status.HTTP_404_NOT_FOUND
             return response
 
@@ -68,11 +69,11 @@ def custom_exception_handler(exc, context):
 
 
 def generate_error_response(
-        type="validation_error",
-        code="invalid",
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail=None,
-        attr=None,
+    type="validation_error",
+    code="invalid",
+    status_code=status.HTTP_400_BAD_REQUEST,
+    detail=None,
+    attr=None,
 ):
     return JsonResponse(
         {"type": type, "code": code, "detail": detail, "attr": attr}, status=status_code

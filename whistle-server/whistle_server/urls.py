@@ -19,6 +19,7 @@ from django.contrib import admin
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 
+from audience.views import AudienceViewSet
 from connector.views import SendgridViewSet, TwilioViewSet
 from external_user.views import ExternalUserViewSet
 from notification.views import NotificationViewSet, BroadcastViewSet
@@ -35,6 +36,7 @@ v1_router.register(r"broadcasts", BroadcastViewSet, basename="broadcasts")
 v1_router.register(r"notifications", NotificationViewSet, basename="notifications")
 v1_router.register(r"connectors/twilio", TwilioViewSet, basename="connectors.twilio")
 v1_router.register(r"connectors/sendgrid", SendgridViewSet, basename="connectors.sendgrid")
+v1_router.register(r"audiences", AudienceViewSet, basename="audiences")
 
 urlpatterns = [
     path("admin/", admin.site.urls),

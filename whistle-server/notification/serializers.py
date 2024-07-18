@@ -1,5 +1,7 @@
 from rest_framework import serializers
+from rest_framework.exceptions import ValidationError
 
+from audience.serializers import FilterSerializer
 from external_user.serializers import ExternalUserSerializer
 from notification.models import (
     Notification,
@@ -64,7 +66,9 @@ class NotificationSerializer(serializers.ModelSerializer):
 
 class BroadcastSerializer(serializers.ModelSerializer):
     id = serializers.UUIDField()
-    recipients = ExternalUserSerializer(many=True)
+    recipients = ExternalUserSerializer(many=True, required=False)
+    audience_id = serializers.UUIDField(required=False, write_only=True)
+    filters = FilterSerializer(many=True, required=False, write_only=True)
     channels = NotificationChannelsSerializer(required=False)
     additional_info = serializers.JSONField(required=False)
 
@@ -73,6 +77,8 @@ class BroadcastSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "recipients",
+            "audience_id",
+            "filters",
             "category",
             "topic",
             "channels",
@@ -87,9 +93,28 @@ class BroadcastSerializer(serializers.ModelSerializer):
     def create(self, validated_data, **kwargs):
         org = self.context["request"].user
         validated_data["organization"] = org
-        validated_data.pop("recipients")
+
+        if "audience_id" in validated_data and "filters" in validated_data:
+            raise ValidationError(
+                "Cannot use both 'audience_id' and 'filters' together. Please specify only one.",
+                "audience_and_filters_unsupported",
+            )
+
+        if "audience_id" in validated_data and "recipients" in validated_data:
+            raise ValidationError(
+                "Cannot use both 'audience_id' and 'recipients' together. Please specify only one.",
+                "audience_and_recipients_unsupported",
+            )
+
+        if "recipients" in validated_data:
+            validated_data.pop("recipients")
         if "channels" in validated_data:
             validated_data.pop("channels")
+        if "filters" in validated_data:
+            validated_data.pop("filters")
+        if "audience_id" in validated_data:
+            validated_data.pop("audience_id")
+
         instance = Broadcast(**validated_data, **kwargs)
         instance.save()
         return instance

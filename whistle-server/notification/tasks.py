@@ -1,15 +1,17 @@
-import datetime
+from datetime import datetime, timezone
 import logging
 
 from asgiref.sync import async_to_sync
 from celery import chord
 from channels.layers import get_channel_layer
+from django.conf import settings
 from django.db import DatabaseError
 from python_http_client import HTTPError
 from sendgrid import SendGridAPIClient, Email, To, Content, Mail
 from twilio.base.exceptions import TwilioRestException
 from twilio.rest import Client
 
+from audience.models import Audience, OperatorChoices
 from connector.models import Twilio, Sendgrid
 from external_user.models import ExternalUser
 from notification.models import Notification, Broadcast
@@ -18,31 +20,258 @@ from subscription.models import ExternalUserSubscription
 from whistle_server.celery import app
 from whistle_server.exceptions import NotificationException
 
+basic_fields = {
+    "email",
+    "phone",
+    "first_name",
+    "last_name",
+    "external_id",
+}
+
 
 @app.task
 def send_broadcast(broadcast_id, org_id, data):
     tasks = []
     recipient_ids = set()
 
-    for recipient in data["recipients"]:
-        try:
-            recipient_entity = update_or_create_external_user(
-                broadcast_id, org_id, recipient, data
-            )
-            tasks.append(handle_recipient.s(broadcast_id, org_id, recipient_entity.id, data))
-            recipient_ids.add(recipient_entity.id)
-        except NotificationException:
-            continue
+    if "audience_id" in data:
+        audience = Audience.objects.prefetch_related("filters").filter(
+            organization_id=org_id, id=data["audience_id"]
+        )
+        filters = audience.first().filters.all()
+        filter_kwargs = build_filter_kwargs(filters)
+        exclude_kwargs = build_exclude_kwargs(filters)
+
+        recipients = ExternalUser.objects.filter(
+            organization_id=org_id, **filter_kwargs
+        ).exclude(**exclude_kwargs)
+
+        logging.info(f"Recipients: {recipients}")
+
+        for recipient in recipients.iterator():
+            try:
+                tasks.append(
+                    handle_recipient.s(broadcast_id, org_id, recipient.id, data)
+                )
+                recipient_ids.add(recipient.id)
+            except NotificationException:
+                continue
+    elif "recipients" in data:
+        if "filters" in data:
+            recipients_to_remove = []
+            for recipient in data["recipients"]:
+                recipient_entity = update_or_create_external_user(
+                    broadcast_id, org_id, recipient, data
+                )
+                for filter_input in data["filters"]:
+                    filtered = apply_filter_to_recipient(
+                        broadcast_id, org_id, filter_input, recipient_entity
+                    )
+                    if filtered:
+                        recipients_to_remove.append(recipient)
+            for recipient in recipients_to_remove:
+                data["recipients"].remove(recipient)
+
+        for recipient in data["recipients"]:
+            try:
+                recipient_entity = update_or_create_external_user(
+                    broadcast_id, org_id, recipient, data
+                )
+                tasks.append(
+                    handle_recipient.s(broadcast_id, org_id, recipient_entity.id, data)
+                )
+                recipient_ids.add(recipient_entity.id)
+            except NotificationException:
+                continue
+
     if "topic" in data:
-        subscribers = ExternalUserSubscription.objects.filter(organization_id=org_id, topic=data["topic"])
+        subscribers = ExternalUserSubscription.objects.filter(
+            organization_id=org_id, topic=data["topic"]
+        )
 
         for subscriber in subscribers:
             if subscriber.id not in recipient_ids:
-                tasks.append(handle_topic_subscriber.s(broadcast_id, org_id, subscriber, data))
+                tasks.append(
+                    handle_topic_subscriber.s(broadcast_id, org_id, subscriber, data)
+                )
 
     result = chord(tasks)(update_broadcast.s(broadcast_id, org_id, data))
 
     return result.id
+
+
+def build_filter_kwargs(filters):
+    query_kwargs = {}
+    for filter_rec in filters:
+        match filter_rec.operator.upper():
+            case OperatorChoices.EQ.value:
+                if filter_rec.property in basic_fields:
+                    query_kwargs[filter_rec.property] = filter_rec.value
+                else:
+                    query_kwargs[f"metadata__{filter_rec.property}"] = filter_rec.value
+            case OperatorChoices.GT.value:
+                query_kwargs[f"metadata__{filter_rec.property}__gt"] = filter_rec.value
+            case OperatorChoices.LT.value:
+                query_kwargs[f"metadata__{filter_rec.property}__lt"] = filter_rec.value
+            case OperatorChoices.GTE.value:
+                query_kwargs[f"metadata__{filter_rec.property}__gte"] = filter_rec.value
+            case OperatorChoices.LTE.value:
+                query_kwargs[f"metadata__{filter_rec.property}__lte"] = filter_rec.value
+            case OperatorChoices.CONTAINS.value:
+                query_kwargs[f"metadata__{filter_rec.property}__contains"] = (
+                    filter_rec.value
+                )
+            case _:
+                continue
+    return query_kwargs
+
+
+def build_exclude_kwargs(filters):
+    query_kwargs = {}
+    for filter_rec in filters:
+        match filter_rec.operator:
+            case OperatorChoices.NEQ:
+                if filter_rec.property in basic_fields:
+                    query_kwargs[filter_rec.property] = filter_rec.value
+                else:
+                    query_kwargs[f"metadata__{filter_rec.property}"] = filter_rec.value
+            case OperatorChoices.DOES_NOT_CONTAIN.value:
+                query_kwargs[f"metadata__{filter_rec.property}__contains"] = (
+                    filter_rec.value
+                )
+            case _:
+                continue
+    return query_kwargs
+
+
+def apply_filter_to_recipient(broadcast_id, org_id, filter_input, recipient_entity):
+    match filter_input["operator"]:
+        case OperatorChoices.EQ.value:
+            if filter_input["property"] in basic_fields:
+                metadata = recipient_entity.metadata
+                if not metadata or not metadata.get(filter_input["property"]):
+                    return True
+                try:
+                    if datetime.strptime(
+                        getattr(recipient_entity, filter_input["property"]),
+                        settings.DATETIME_FORMAT,
+                    ) != datetime.strptime(filter_input["value"]):
+                        return True
+                except ValueError:
+                    if (
+                        getattr(recipient_entity, filter_input["property"])
+                        != filter_input["value"]
+                    ):
+                        return True
+        case OperatorChoices.NEQ.value:
+            if filter_input["property"] in basic_fields:
+                metadata = recipient_entity.metadata
+                if not metadata or not metadata.get(filter_input["property"]):
+                    return True
+                try:
+                    if datetime.strptime(
+                        getattr(recipient_entity, filter_input["property"]),
+                        settings.DATETIME_FORMAT,
+                    ) == datetime.strptime(filter_input["value"]):
+                        return True
+                except ValueError:
+                    if (
+                        getattr(recipient_entity, filter_input["property"])
+                        == filter_input["value"]
+                    ):
+                        return True
+        case OperatorChoices.GT.value:
+            metadata = recipient_entity.metadata
+            if not metadata or not metadata.get(filter_input["property"]):
+                return True
+            else:
+                try:
+                    if datetime.strptime(
+                        metadata.get(filter_input["property"]),
+                        settings.DATETIME_FORMAT,
+                    ) <= datetime.strptime(filter_input["value"]):
+                        return True
+                except ValueError:
+                    if metadata.get(filter_input["property"]) <= filter_input["value"]:
+                        return True
+        case OperatorChoices.LT.value:
+            metadata = recipient_entity.metadata
+            if not metadata or not metadata.get(filter_input["property"]):
+                return True
+            else:
+                try:
+                    if datetime.strptime(
+                        metadata.get(filter_input["property"]),
+                        settings.DATETIME_FORMAT,
+                    ) >= datetime.strptime(filter_input["value"]):
+                        return True
+                except ValueError:
+                    if metadata.get(filter_input["property"]) >= filter_input["value"]:
+                        return True
+        case OperatorChoices.GTE.value:
+            metadata = recipient_entity.metadata
+            if not metadata or not metadata.get(filter_input["property"]):
+                return True
+            else:
+                try:
+                    if datetime.strptime(
+                        metadata.get(filter_input["property"]),
+                        settings.DATETIME_FORMAT,
+                    ) < datetime.strptime(filter_input["value"]):
+                        return True
+                except ValueError:
+                    if metadata.get(filter_input["property"]) < filter_input["value"]:
+                        return True
+        case OperatorChoices.LTE.value:
+            metadata = recipient_entity.metadata
+            if not metadata or not metadata.get(filter_input["property"]):
+                return True
+            else:
+                try:
+                    if datetime.strptime(
+                        metadata.get(filter_input["property"]),
+                        settings.DATETIME_FORMAT,
+                    ) > datetime.strptime(filter_input["value"]):
+                        return True
+                except ValueError:
+                    if metadata.get(filter_input["property"]) > filter_input["value"]:
+                        return True
+        case OperatorChoices.CONTAINS.value:
+            metadata = recipient_entity.metadata
+            if not metadata or not metadata.get(filter_input["property"]):
+                return True
+            elif isinstance(
+                metadata.get(filter_input["property"]), str
+            ) and filter_input["value"] not in metadata.get(
+                filter_input["property"], ""
+            ):
+                return True
+            elif isinstance(
+                metadata.get(filter_input["property"]), list
+            ) and filter_input["value"] not in metadata.get(
+                filter_input["property"], []
+            ):
+                return True
+        case OperatorChoices.DOES_NOT_CONTAIN.value:
+            metadata = recipient_entity.metadata
+            if not metadata or not metadata.get(filter_input["property"]):
+                return True
+            elif isinstance(
+                metadata.get(filter_input["property"]), str
+            ) and filter_input["value"] in metadata.get(filter_input["property"], ""):
+                return True
+            elif isinstance(
+                metadata.get(filter_input["property"]), list
+            ) and filter_input["value"] in metadata.get(filter_input["property"], []):
+                return True
+        case _:
+            logging.debug(
+                "Broadcast: %s with org: %s passed unsupported operator: %s",
+                broadcast_id,
+                org_id,
+                filter_input["operator"],
+            )
+    return False
 
 
 @app.task
@@ -53,7 +282,7 @@ def handle_recipient(broadcast_id, org_id, recipient_id, data):
         if "category" in data:
             preference = ExternalUserPreference.objects.prefetch_related(
                 "channels"
-            ).filter(user_id=recipient.id, slug=data['category'])
+            ).filter(user_id=recipient.id, slug=data["category"])
 
             if preference:
                 route_notification_with_preference(
@@ -80,15 +309,17 @@ def handle_topic_subscriber(broadcast_id, org_id, subscriber_id, data):
         subscriber = ExternalUserSubscription.objects.get(pk=subscriber_id)
 
         if "category" in data:
-            subscriber_category = subscriber.categories.filter(
-                slug=data["category"]
-            )
+            subscriber_category = subscriber.categories.filter(slug=data["category"])
 
             preference = ExternalUserPreference.objects.prefetch_related(
                 "channels"
             ).filter(user_id=subscriber.user.id, slug=data["category"])
 
-            if subscriber_category and preference and subscriber_category.first().enabled:
+            if (
+                subscriber_category
+                and preference
+                and subscriber_category.first().enabled
+            ):
                 route_notification_with_preference(
                     broadcast_id,
                     org_id,
@@ -135,7 +366,9 @@ def send_sms(broadcast_id, org_id, user_id, data):
         )
     except Twilio.DoesNotExist:
         logging.error(
-            "Twilio account not connected for org: %s for broadcast: %s", org_id, broadcast_id
+            "Twilio account not connected for org: %s for broadcast: %s",
+            org_id,
+            broadcast_id,
         )
         raise NotificationException(
             "Twilio account not connected", "twilio_account_not_connected"
@@ -179,7 +412,9 @@ def send_email(broadcast_id, org_id, user_id, data):
         )
     except Sendgrid.DoesNotExist:
         logging.error(
-            "Sendgrid account not connected for org: %s for broadcast: %s", org_id, broadcast_id
+            "Sendgrid account not connected for org: %s for broadcast: %s",
+            org_id,
+            broadcast_id,
         )
         raise NotificationException(
             "Sendgrid account not connected", "sendgrid_account_not_connected"
@@ -232,15 +467,22 @@ def send_web(notification_id, broadcast_id, org_id, user_id, data):
 
 @app.task(throws=(DatabaseError,))
 def persist_notification(broadcast_id, org_id, user_id, data, **kwargs):
-    data.pop("channels")
-    data.pop('recipients')
+    if "channels" in data:
+        data.pop("channels")
+    if "recipients" in data:
+        data.pop("recipients")
     try:
-        notification = Notification.objects.create(organization_id=org_id, recipient_id=user_id,
-                                                   category=data.get('category', ""), topic=data.get('topic', ""),
-                                                   title=data.get('title', ""),
-                                                   content=data.get('content', ""),
-                                                   action_link=data.get('action_link', ""),
-                                                   additional_info=data.get('additional_info'), **kwargs)
+        notification = Notification.objects.create(
+            organization_id=org_id,
+            recipient_id=user_id,
+            category=data.get("category", ""),
+            topic=data.get("topic", ""),
+            title=data.get("title", ""),
+            content=data.get("content", ""),
+            action_link=data.get("action_link", ""),
+            additional_info=data.get("additional_info"),
+            **kwargs,
+        )
 
         logging.info(
             "Notification record with id: %s persisted for user: %s and org: %s for broadcast: %s",
@@ -286,8 +528,10 @@ def persist_notification(broadcast_id, org_id, user_id, data, **kwargs):
 
 @app.task(throws=(DatabaseError,))
 def update_broadcast(delivered_to, broadcast_id, org_id, data):
-    data.pop("channels")
-    data.pop("recipients")
+    if "channels" in data:
+        data.pop("channels")
+    if "recipients" in data:
+        data.pop("recipients")
     try:
         broadcast = Broadcast.objects.get(pk=broadcast_id)
         broadcast.status = "processed"
@@ -368,13 +612,11 @@ def route_notification_with_preference(broadcast_id, org_id, recipient, channels
     )
     web_preference_entity = channels.get(slug="web")
     if web_preference_entity.enabled:
-        persist_notification.apply_async((broadcast_id, org_id, recipient.id, data),
-                                         sent_at=datetime.datetime.now(datetime.timezone.utc), link=send_web.s(
-                broadcast_id,
-                org_id,
-                recipient.id,
-                data
-            ))
+        persist_notification.apply_async(
+            (broadcast_id, org_id, recipient.id, data),
+            sent_at=datetime.now(timezone.utc),
+            link=send_web.s(broadcast_id, org_id, recipient.id, data),
+        )
     else:
         logging.info(
             "Web push disabled for category %s for user: %s in org: %s for broadcast: %s",
@@ -418,13 +660,11 @@ def route_basic_notification(broadcast_id, org_id, recipient, data):
         org_id,
         broadcast_id,
     )
-    persist_notification.apply_async((broadcast_id, org_id, recipient.id, data),
-                                     sent_at=datetime.datetime.now(datetime.timezone.utc), link=send_web.s(
-            broadcast_id,
-            org_id,
-            recipient.id,
-            data
-        ))
+    persist_notification.apply_async(
+        (broadcast_id, org_id, recipient.id, data),
+        sent_at=datetime.now(timezone.utc),
+        link=send_web.s(broadcast_id, org_id, recipient.id, data),
+    )
     if "channels" in data:
         if "sms" in data["channels"] and recipient.phone is not None:
             send_sms.delay(broadcast_id, org_id, recipient.id, data)

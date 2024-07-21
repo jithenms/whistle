@@ -43,7 +43,7 @@ services:
       context: .
       dockerfile: ./whistle-server/Dockerfile
     entrypoint: /usr/local/bin/start-scheduler.sh
-    command: --concurrency=1 --loglevel=DEBUG
+    command: --loglevel=DEBUG
     env_file:
       - ./whistle-server/whistle_server/.env
     depends_on:

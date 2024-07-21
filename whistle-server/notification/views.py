@@ -140,9 +140,7 @@ class BroadcastViewSet(
         instance = serializer.save(status="queued")
         try:
             schedule_at = serializer.validated_data.get("schedule_at")
-            if schedule_at and schedule_at - datetime.now(
-                tz=schedule_at.tzinfo
-            ) > timedelta(0):
+            if schedule_at:
                 schedule_broadcast.delay(
                     str(broadcast_id),
                     str(self.request.user.id),

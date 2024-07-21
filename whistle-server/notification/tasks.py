@@ -43,7 +43,7 @@ def schedule_broadcast(broadcast_id, org_id, data):
             entry.name = broadcast_id
             entry.task = "notification.tasks.send_broadcast"
             entry.args = [broadcast_id, org_id, data]
-            entry.schedule = schedule(schedule_at - datetime.now(tz=schedule_at.tzinfo))
+            entry.schedule = schedule(max(schedule_at - datetime.now(tz=schedule_at.tzinfo), timedelta(0)))
             entry.save()
             broadcast.scheduled_at = schedule_at
             broadcast.status = "scheduled"
@@ -67,7 +67,7 @@ def schedule_broadcast(broadcast_id, org_id, data):
         raise
 
 
-@shared_task
+@app.task
 def send_broadcast(broadcast_id, org_id, data):
     tasks = []
     recipient_ids = set()

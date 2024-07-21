@@ -3,7 +3,6 @@ import logging
 from django.db import transaction
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
-from sendgrid.helpers.mail import category
 
 from external_user.models import ExternalUser
 from preference.models import (
@@ -25,7 +24,7 @@ class ExternalUserPreferenceChannelSerializer(serializers.ModelSerializer):
         value_upper = value.upper()
         # Check if the value is a valid choice
         if value_upper not in ChannelChoices.values:
-            raise serializers.ValidationError(f"'{value}' is not a valid choice.")
+            raise ValidationError(f"'{value}' is not a valid choice.")
         return value_upper
 
 

@@ -24,9 +24,9 @@ logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = os.environ['DJANGO_SECRET_KEY']
+SECRET_KEY = os.environ["DJANGO_SECRET_KEY"]
 
-ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", ',').split(",")
+ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", ",").split(",")
 ALLOWED_HOSTS.append(gethostbyname(gethostname()))
 
 ENVIRONMENT = os.environ.get("ENVIRONMENT")
@@ -59,8 +59,8 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "rest_framework",
     "channels",
-    'health_check',
-    'drf_spectacular'
+    "health_check",
+    "drf_spectacular",
 ]
 
 CHANNEL_LAYERS = {
@@ -85,16 +85,16 @@ MIDDLEWARE = [
 REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": ("rest_framework.renderers.JSONRenderer",),
     "EXCEPTION_HANDLER": "whistle_server.exceptions.custom_exception_handler",
-    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
 }
 
 import whistle_server.schema
 
 SPECTACULAR_SETTINGS = {
-    'TITLE': 'Whistle API',
-    'DESCRIPTION': 'REST API for the Whistle notification platform',
-    'VERSION': '1.0.0',
-    'SERVE_INCLUDE_SCHEMA': False,
+    "TITLE": "Whistle API",
+    "DESCRIPTION": "REST API for the Whistle notification platform",
+    "VERSION": "1.0.0",
+    "SERVE_INCLUDE_SCHEMA": False,
     # OTHER SETTINGS
 }
 
@@ -117,29 +117,29 @@ TEMPLATES = [
 ]
 
 LOGGING = {
-    'version': 1,
-    'disable_existing_loggers': False,
-    'formatters': {
-        'verbose': {
-            'format': '{levelname} {asctime} {module} {process:d} {thread:d} {message}',
-            'style': '{',
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {
+            "format": "{levelname} {asctime} {module} {process:d} {thread:d} {message}",
+            "style": "{",
         },
     },
-    'handlers': {
-        'console': {
-            'class': 'logging.StreamHandler',
-            'formatter': 'verbose',
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "verbose",
         },
     },
-    'root': {
-        'handlers': ['console'],
-        'level': os.getenv('DJANGO_LOG_LEVEL', 'DEBUG'),
+    "root": {
+        "handlers": ["console"],
+        "level": os.getenv("DJANGO_LOG_LEVEL", "DEBUG"),
     },
-    'loggers': {
-        'django': {
-            'handlers': ['console'],
-            'level': os.getenv('DJANGO_LOG_LEVEL', 'DEBUG'),
-            'propagate': False,
+    "loggers": {
+        "django": {
+            "handlers": ["console"],
+            "level": os.getenv("DJANGO_LOG_LEVEL", "DEBUG"),
+            "propagate": False,
         },
     },
 }
@@ -156,7 +156,7 @@ DATABASES = {
         "PASSWORD": os.environ.get("SQL_PASSWORD", "postgres"),
         "HOST": os.environ.get("SQL_HOST", "127.0.0.1"),
         "PORT": os.environ.get("SQL_PORT", "5432"),
-        'OPTIONS': {'sslmode': os.environ.get("SSL_MODE", 'disable')},
+        "OPTIONS": {"sslmode": os.environ.get("SSL_MODE", "disable")},
     }
 }
 
@@ -190,11 +190,16 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_TASK_TRACK_STARTED = True
+CELERY_ACKS_LATE = True
+CELERYBEAT_SCHEDULER = 'redbeat.RedBeatScheduler'
 
 CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://127.0.0.1:6379/0")
-CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", "redis://127.0.0.1:6379/0")
+CELERY_RESULT_BACKEND = os.environ.get(
+    "CELERY_RESULT_BACKEND", "redis://127.0.0.1:6379/0"
+)
+
+REDBEAT_REDIS_URL = os.environ.get("REDBEAT_REDIS_URL", "redis://127.0.0.1:6379/0")
+REDBEAT_REDIS_USE_SSL = True if os.environ.get("SSL_MODE") == "enable" else False
 
 WHISTLE_SECRET_KEY = os.getenv("WHISTLE_SECRET_KEY")
 WHISTLE_JWKS_ENDPOINT = os.getenv("WHISTLE_JWKS_ENDPOINT")
-
-DATETIME_FORMAT = os.environ.get("DATETIME_FORMAT", "%Y-%m-%d %H:%M:%S")

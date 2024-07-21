@@ -1,12 +1,15 @@
-from datetime import datetime, timezone
+import uuid
+from datetime import datetime, timezone, timedelta
 import logging
 
 from asgiref.sync import async_to_sync
-from celery import chord
+from celery import chord, shared_task
+from celery.schedules import schedule
 from channels.layers import get_channel_layer
 from django.conf import settings
-from django.db import DatabaseError
+from django.db import DatabaseError, transaction
 from python_http_client import HTTPError
+from redbeat import RedBeatSchedulerEntry
 from sendgrid import SendGridAPIClient, Email, To, Content, Mail
 from twilio.base.exceptions import TwilioRestException
 from twilio.rest import Client
@@ -29,10 +32,48 @@ basic_fields = {
 }
 
 
-@app.task
+@app.task(throws=(DatabaseError,))
+def schedule_broadcast(broadcast_id, org_id, data):
+    broadcast = Broadcast.objects.get(pk=uuid.UUID(broadcast_id))
+    try:
+        data["id"] = str(data["id"])
+        schedule_at = data.get("schedule_at")
+        with transaction.atomic():
+            entry = RedBeatSchedulerEntry(app=app)
+            entry.name = broadcast_id
+            entry.task = "notification.tasks.send_broadcast"
+            entry.args = [broadcast_id, org_id, data]
+            entry.schedule = schedule(schedule_at - datetime.now(tz=schedule_at.tzinfo))
+            entry.save()
+            broadcast.scheduled_at = schedule_at
+            broadcast.status = "scheduled"
+            broadcast.save()
+            logging.info(
+                "Broadcast scheduled at: %s with id: %s for org: %s",
+                schedule_at,
+                broadcast_id,
+                org_id,
+            )
+            return broadcast.id
+    except DatabaseError as error:
+        broadcast.status = "failed"
+        broadcast.save()
+        logging.error(
+            "Failed to schedule for broadcast: %s in org: %s with database error: %s",
+            broadcast_id,
+            org_id,
+            error,
+        )
+        raise
+
+
+@shared_task
 def send_broadcast(broadcast_id, org_id, data):
     tasks = []
     recipient_ids = set()
+
+    broadcast_id = uuid.UUID(broadcast_id)
+    org_id = uuid.UUID(org_id)
 
     if "audience_id" in data:
         audience = Audience.objects.prefetch_related("filters").filter(
@@ -95,7 +136,15 @@ def send_broadcast(broadcast_id, org_id, data):
                     handle_topic_subscriber.s(broadcast_id, org_id, subscriber, data)
                 )
 
-    result = chord(tasks)(update_broadcast.s(broadcast_id, org_id, data))
+    if "schedule_at" in data:
+        try:
+            entry = RedBeatSchedulerEntry.from_key(f"redbeat:{broadcast_id}", app=app)
+            entry.delete()
+            logging.info("Removed scheduled task after invoking for broadcast: %s", broadcast_id)
+        except KeyError:
+            pass
+
+    result = chord(tasks)(update_broadcast.s(broadcast_id, org_id, data, "processed"))
 
     return result.id
 
@@ -528,14 +577,14 @@ def persist_notification(broadcast_id, org_id, user_id, data, **kwargs):
 
 
 @app.task(throws=(DatabaseError,))
-def update_broadcast(delivered_to, broadcast_id, org_id, data):
+def update_broadcast(delivered_to, broadcast_id, org_id, data, status):
     if "channels" in data:
         data.pop("channels")
     if "recipients" in data:
         data.pop("recipients")
     try:
         broadcast = Broadcast.objects.get(pk=broadcast_id)
-        broadcast.status = "processed"
+        broadcast.status = status
         broadcast.save()
         return broadcast_id
     except DatabaseError as error:

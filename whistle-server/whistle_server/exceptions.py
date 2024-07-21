@@ -21,7 +21,7 @@ class NotificationException(Exception):
 def custom_exception_handler(exc, context):
     response = exception_handler(exc, context)
 
-    logging.info(exc)
+    logging.debug(exc)
 
     if response is not None:
         if isinstance(exc, AuthenticationFailed):

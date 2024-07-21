@@ -67,6 +67,7 @@ class NotificationSerializer(serializers.ModelSerializer):
 class BroadcastSerializer(serializers.ModelSerializer):
     id = serializers.UUIDField()
     recipients = ExternalUserSerializer(many=True, required=False)
+    schedule_at = serializers.DateTimeField(required=False)
     audience_id = serializers.UUIDField(required=False, write_only=True)
     filters = FilterSerializer(many=True, required=False, write_only=True)
     channels = NotificationChannelsSerializer(required=False)
@@ -77,6 +78,7 @@ class BroadcastSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "recipients",
+            "schedule_at",
             "audience_id",
             "filters",
             "category",
@@ -90,21 +92,23 @@ class BroadcastSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ("status",)
 
-    def create(self, validated_data, **kwargs):
-        org = self.context["request"].user
-        validated_data["organization"] = org
-
-        if "audience_id" in validated_data and "filters" in validated_data:
+    def validate(self, data):
+        if "audience_id" in data and "filters" in data:
             raise ValidationError(
                 "Cannot use both 'audience_id' and 'filters' together. Please specify only one.",
                 "audience_and_filters_unsupported",
             )
 
-        if "audience_id" in validated_data and "recipients" in validated_data:
+        if "audience_id" in data and "recipients" in data:
             raise ValidationError(
                 "Cannot use both 'audience_id' and 'recipients' together. Please specify only one.",
                 "audience_and_recipients_unsupported",
             )
+        return super().validate(data)
+
+    def create(self, validated_data, **kwargs):
+        org = self.context["request"].user
+        validated_data["organization"] = org
 
         if "recipients" in validated_data:
             validated_data.pop("recipients")
@@ -114,6 +118,8 @@ class BroadcastSerializer(serializers.ModelSerializer):
             validated_data.pop("filters")
         if "audience_id" in validated_data:
             validated_data.pop("audience_id")
+        if "schedule_at" in validated_data:
+            validated_data.pop("schedule_at")
 
         instance = Broadcast(**validated_data, **kwargs)
         instance.save()

@@ -37,6 +37,19 @@ services:
     depends_on:
       - redis
       - db
+    
+  scheduler:
+    build:
+      context: .
+      dockerfile: ./whistle-server/Dockerfile
+    entrypoint: /usr/local/bin/start-scheduler.sh
+    command: --concurrency=1 --loglevel=DEBUG
+    env_file:
+      - ./whistle-server/whistle_server/.env
+    depends_on:
+      - redis
+      - worker
+      - db
 
   db:
     image: postgres:16-alpine

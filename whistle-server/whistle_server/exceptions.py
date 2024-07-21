@@ -21,8 +21,6 @@ class NotificationException(Exception):
 def custom_exception_handler(exc, context):
     response = exception_handler(exc, context)
 
-    logging.debug(exc)
-
     if response is not None:
         if isinstance(exc, AuthenticationFailed):
             response.data["code"] = exc.get_codes()
@@ -69,6 +67,8 @@ def custom_exception_handler(exc, context):
                 "The record you are trying to create violates a unique constraint. Please ensure your request does not "
                 "contain existing identifiers or slugs.",
             )
+    
+    logging.info("Unrecognized exception: %s", exc)
 
     return generate_error_response(
         "server_error",

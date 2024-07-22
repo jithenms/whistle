@@ -1,10 +1,11 @@
 from rest_framework import serializers
 
 from audience.serializers import FilterSerializer
+from connector.models import Sendgrid, Twilio, FCM, APNS
 from external_user.serializers import ExternalUserSerializer
 from notification.models import (
     Notification,
-    Broadcast,
+    Broadcast, NotificationChannel,
 )
 
 
@@ -59,10 +60,20 @@ class NotificationChannelsSerializer(serializers.Serializer):
     email = ChannelEmailSerializer(required=False)
     sms = ChannelSMSSerializer(required=False)
     mobile_push = ChannelMobilePushSerializer(required=False)
+class NotificationChannelSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = NotificationChannel
+        fields = [
+            'slug',
+            'status',
+            'reason',
+            'metadata'
+        ]
 
 
 class NotificationSerializer(serializers.ModelSerializer):
     recipient = ExternalUserSerializer(read_only=True)
+    channels = NotificationChannelSerializer(many=True, read_only=True)
     additional_info = serializers.JSONField(required=False, default=dict)
 
     seen_at = serializers.DateTimeField(required=False)
@@ -73,7 +84,9 @@ class NotificationSerializer(serializers.ModelSerializer):
         model = Notification
         fields = [
             "id",
+            "broadcast_id",
             "recipient",
+            "channels",
             "category",
             "topic",
             "title",
@@ -102,6 +115,29 @@ class NotificationSerializer(serializers.ModelSerializer):
         return super().update(instance, validated_data)
 
 
+class ChannelEmailSerializer(serializers.Serializer):
+    subject = serializers.CharField(max_length=255)
+    content = serializers.CharField(max_length=255)
+
+
+class ChannelSMSSerializer(serializers.Serializer):
+    body = serializers.CharField(max_length=255)
+
+
+class ChannelMobilePushSerializer(serializers.Serializer):
+    title = serializers.CharField(max_length=255)
+    subtitle = serializers.CharField(max_length=255, required=False)
+    body = serializers.CharField(max_length=255)
+    badge = serializers.CharField(max_length=255, required=False)
+    sound = serializers.CharField(max_length=255, required=False)
+
+
+class BroadcastChannelSerializer(serializers.Serializer):
+    email = ChannelEmailSerializer(required=False)
+    sms = ChannelSMSSerializer(required=False)
+    mobile_push = ChannelMobilePushSerializer(required=False)
+
+
 class BroadcastSerializer(serializers.ModelSerializer):
     id = serializers.UUIDField()
     recipients = ExternalUserSerializer(many=True, required=False)
@@ -111,6 +147,9 @@ class BroadcastSerializer(serializers.ModelSerializer):
     channels = NotificationChannelsSerializer(required=False)
     additional_info = serializers.JSONField(required=False, default=dict)
     data = serializers.JSONField(required=False, default=dict)
+    channels = BroadcastChannelSerializer(required=False)
+    additional_info = serializers.JSONField(required=False, default=dict)
+    metadata = serializers.JSONField(read_only=True, default=dict)
 
     class Meta:
         model = Broadcast
@@ -128,6 +167,7 @@ class BroadcastSerializer(serializers.ModelSerializer):
             "content",
             "action_link",
             "additional_info",
+            "metadata",
             "status",
         ]
         read_only_fields = ("status",)
@@ -145,8 +185,37 @@ class BroadcastSerializer(serializers.ModelSerializer):
                 "audience_and_recipients_unsupported",
             )
 
+        if "email" in data.get('channels', {}):
+            sendgrid = Sendgrid.objects.filter(organization=self.context["request"].user)
+            if not sendgrid:
+                raise serializers.ValidationError(
+                    "Sendgrid account not configured. Please configure a Sendgrid account to send emails.",
+                    "sendgrid_account_not_configured",
+                )
+
+        if "sms" in data.get('channels', {}):
+            twilio = Twilio.objects.filter(organization=self.context["request"].user)
+            if not twilio:
+                raise serializers.ValidationError(
+                    "Twilio account not configured. Please configure a Twilio account to send texts.",
+                    "twilio_account_not_configured",
+                )
+
+        if "mobile_push" in data.get('channels', {}):
+            fcm = FCM.objects.filter(organization=self.context["request"].user)
+            apns = APNS.objects.filter(organization=self.context["request"].user)
+
+            if not fcm and not apns:
+                raise serializers.ValidationError(
+                    "FCM and APNS are not configured. Please configure at least one to send mobile notifications.",
+                    "fcm_and_apns_not_configured",
+                )
+
+        data['metadata'] = {}
+
+
         if "data" in data and "email" not in data.get("channels", {}):
-            raise ValidationError(
+            raise serializers.ValidationError(
                 {'data': "The 'data' field requires 'channels.email.sendgrid_template_id' to be specified."},
                 "sendgrid_template_id_unspecified",
             )

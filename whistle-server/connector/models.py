@@ -32,5 +32,5 @@ class APNS(models.Model):
 class FCM(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE)
-    private_key = models.TextField()
+    credentials = models.JSONField()
     project_id = models.CharField(max_length=255, unique=True)

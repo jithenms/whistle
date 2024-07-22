@@ -46,7 +46,6 @@ class ExternalUserSerializer(serializers.ModelSerializer):
         )
         return response
 
-
 class ExternalUserDeviceSerializer(serializers.ModelSerializer):
     class Meta:
         model = ExternalUserDevice

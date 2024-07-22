@@ -16,6 +16,7 @@ class Broadcast(models.Model):
     content = models.CharField(max_length=255)
     action_link = models.CharField(max_length=255, blank=True)
     additional_info = models.JSONField(null=True, blank=True)
+    metadata = models.JSONField(null=True, blank=True)
     scheduled_at = models.DateTimeField(null=True, blank=True)
     status = models.CharField(max_length=255)
     sent_at = models.DateTimeField(null=True, blank=True)
@@ -42,3 +43,5 @@ class NotificationChannel(models.Model):
     notification = models.ForeignKey(Notification, on_delete=models.CASCADE)
     slug = models.SlugField(choices=ChannelChoices.choices)
     status = models.CharField(max_length=255)
+    reason = models.CharField(max_length=255, blank=True)
+    metadata = models.JSONField(null=True, blank=True)

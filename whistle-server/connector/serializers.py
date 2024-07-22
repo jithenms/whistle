@@ -89,7 +89,7 @@ class APNSSerializer(serializers.ModelSerializer):
 class FCMSerializer(serializers.ModelSerializer):
     class Meta:
         model = FCM
-        fields = ["id", "private_key", "project_id"]
+        fields = ["id", "credentials", "project_id"]
 
     def create(self, validated_data):
         org = self.context["request"].user

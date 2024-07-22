@@ -43,7 +43,9 @@ def schedule_broadcast(broadcast_id, org_id, data):
             entry.name = broadcast_id
             entry.task = "notification.tasks.send_broadcast"
             entry.args = [broadcast_id, org_id, data]
-            entry.schedule = schedule(max(schedule_at - datetime.now(tz=schedule_at.tzinfo), timedelta(0)))
+            entry.schedule = schedule(
+                max(schedule_at - datetime.now(tz=schedule_at.tzinfo), timedelta(0))
+            )
             entry.save()
             broadcast.scheduled_at = schedule_at
             broadcast.status = "scheduled"
@@ -140,7 +142,9 @@ def send_broadcast(broadcast_id, org_id, data):
         try:
             entry = RedBeatSchedulerEntry.from_key(f"redbeat:{broadcast_id}", app=app)
             entry.delete()
-            logging.info("Removed scheduled task after invoking for broadcast: %s", broadcast_id)
+            logging.info(
+                "Removed scheduled task after invoking for broadcast: %s", broadcast_id
+            )
         except KeyError:
             pass
 
@@ -444,12 +448,20 @@ def send_email(broadcast_id, org_id, user_id, data):
 
         from_email = Email(sendgrid_conn.from_email)
         to_email = To(user.email)
-        subject = data["channels"]["email"]["subject"]
-        content = Content("text/plain", data["channels"]["email"]["content"])
-        mail = Mail(from_email, to_email, subject, content)
-        response = sg.client.mail.send.post(request_body=mail.get())
+
+        mail = Mail(from_email, to_email)
+        if "sendgrid_template_id" in data["channels"]["email"]:
+            mail.dynamic_template_data = data["data"]
+            mail.template_id = data["channels"]["email"]["sendgrid_template_id"]
+        else:
+            mail.subject = data["channels"]["email"]["subject"]
+            mail.content = Content("text/plain", data["channels"]["email"]["content"])
+        response = sg.send(mail)
         logging.info(
-            "Sendgrid email sent to user: %s with broadcast: %s", user_id, broadcast_id
+            "Sendgrid email with status code: %s sent to user: %s with broadcast: %s",
+            response.status_code,
+            user_id,
+            broadcast_id,
         )
         return response
     except HTTPError as error:
@@ -530,7 +542,6 @@ def persist_notification(broadcast_id, org_id, user_id, data, **kwargs):
             title=data.get("title", ""),
             content=data.get("content", ""),
             action_link=data.get("action_link", ""),
-            additional_info=data.get("additional_info"),
             **kwargs,
         )
 

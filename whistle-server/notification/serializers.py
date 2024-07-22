@@ -12,6 +12,7 @@ from notification.models import (
 class ChannelEmailSerializer(serializers.Serializer):
     subject = serializers.CharField(max_length=255)
     content = serializers.CharField(max_length=255)
+    sendgrid_template_id = serializers.CharField(max_length=255, required=False)
 
 
 class ChannelSMSSerializer(serializers.Serializer):
@@ -25,7 +26,7 @@ class NotificationChannelsSerializer(serializers.Serializer):
 
 class NotificationSerializer(serializers.ModelSerializer):
     recipient = ExternalUserSerializer(read_only=True)
-    additional_info = serializers.JSONField(required=False)
+    additional_info = serializers.JSONField(required=False, default=dict)
 
     seen_at = serializers.DateTimeField(required=False)
     read_at = serializers.DateTimeField(required=False)
@@ -71,7 +72,8 @@ class BroadcastSerializer(serializers.ModelSerializer):
     audience_id = serializers.UUIDField(required=False, write_only=True)
     filters = FilterSerializer(many=True, required=False, write_only=True)
     channels = NotificationChannelsSerializer(required=False)
-    additional_info = serializers.JSONField(required=False)
+    additional_info = serializers.JSONField(required=False, default=dict)
+    data = serializers.JSONField(required=False, default=dict)
 
     class Meta:
         model = Broadcast
@@ -80,6 +82,7 @@ class BroadcastSerializer(serializers.ModelSerializer):
             "recipients",
             "schedule_at",
             "audience_id",
+            "data",
             "filters",
             "category",
             "topic",
@@ -104,22 +107,28 @@ class BroadcastSerializer(serializers.ModelSerializer):
                 "Cannot use both 'audience_id' and 'recipients' together. Please specify only one.",
                 "audience_and_recipients_unsupported",
             )
+
+        if "data" in data and "email" not in data.get("channels", {}):
+            raise ValidationError(
+                "Cannot use 'data' without specifying a sendgrid template id.",
+                "sendgrid_template_id_unspecified",
+            )
+
         return super().validate(data)
 
     def create(self, validated_data, **kwargs):
         org = self.context["request"].user
         validated_data["organization"] = org
 
-        if "recipients" in validated_data:
-            validated_data.pop("recipients")
-        if "channels" in validated_data:
-            validated_data.pop("channels")
-        if "filters" in validated_data:
-            validated_data.pop("filters")
-        if "audience_id" in validated_data:
-            validated_data.pop("audience_id")
-        if "schedule_at" in validated_data:
-            validated_data.pop("schedule_at")
+        for field in [
+            "recipients",
+            "channels",
+            "filters",
+            "audience_id",
+            "schedule_at",
+        ]:
+            if field in validated_data:
+                validated_data.pop(field)
 
         instance = Broadcast(**validated_data, **kwargs)
         instance.save()

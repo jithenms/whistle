@@ -476,7 +476,7 @@ def send_email(notification_id, broadcast_id, org_id, user_id, data):
 
 
 @app.task
-def send_web(notification_id, broadcast_id, org_id, user_id, data):
+def send_web(notification_id, user_id, data):
     channel_layer = get_channel_layer()
     async_to_sync(channel_layer.group_send)(
         f"user_{user_id}",
@@ -499,7 +499,7 @@ def send_web(notification_id, broadcast_id, org_id, user_id, data):
 
 
 @app.task
-def send_mobile(notification_id, broadcast_id, org_id, user_id, data):
+def send_mobile(notification_id, org_id, user_id, data):
     devices = ExternalUserDevice.objects.filter(user_id=user_id)
 
     if not devices:
@@ -517,6 +517,7 @@ def send_mobile(notification_id, broadcast_id, org_id, user_id, data):
                     NotificationChannel.objects.create(notification_id=notification_id,
                                                        slug=ChannelChoices.MOBILE_PUSH,
                                                        status="not_sent", reason="APNS account not configured")
+                    continue
                 payload = IOSPayload(
                     alert=IOSPayloadAlert(
                         title=data['channels']['mobile_push']['title'],
@@ -565,6 +566,7 @@ def send_mobile(notification_id, broadcast_id, org_id, user_id, data):
                     NotificationChannel.objects.create(notification_id=notification_id,
                                                        slug=ChannelChoices.MOBILE_PUSH,
                                                        status="not_sent", reason="FCM account not configured")
+                    continue
                 notification = CustomFCMNotification(service_account_file=fcm.first().credentials,
                                                      project_id=fcm.first().project_id)
                 res = notification.notify(fcm_token=device.token,
@@ -583,7 +585,7 @@ def send_mobile(notification_id, broadcast_id, org_id, user_id, data):
 
 
 @app.task
-def update_broadcast_status(delivered_to, broadcast_id, status):
+def update_broadcast_status(_, broadcast_id, status):
     broadcast = Broadcast.objects.get(pk=broadcast_id)
     broadcast.status = status
     broadcast.save()
@@ -691,7 +693,7 @@ def route_notification_with_preference(broadcast_id, org_id, recipient, channels
 
     web_preference_entity = channels.get(slug=ChannelChoices.WEB.value)
     if web_preference_entity.enabled:
-        send_web.delay(notification.id, broadcast_id, org_id, recipient.id, data)
+        send_web.delay(notification.id, recipient.id, data)
     else:
         logging.info(
             "Web push disabled for category %s for user: %s in org: %s for broadcast: %s",
@@ -747,7 +749,7 @@ def route_notification_with_preference(broadcast_id, org_id, recipient, channels
         if "mobile_push" in data['channels']:
             mobile_preference_entity = channels.get(slug=ChannelChoices.MOBILE_PUSH.value)
             if mobile_preference_entity.enabled:
-                send_mobile.delay(notification.id, broadcast_id, org_id, recipient.id, data)
+                send_mobile.delay(notification.id, org_id, recipient.id, data)
             else:
                 logging.info(
                     "Mobile push disabled for category: %s for user: %s in org: %s for broadcast: %s",
@@ -770,7 +772,7 @@ def route_basic_notification(broadcast_id, org_id, recipient, data):
     )
 
     notification = persist_notification(broadcast_id, org_id, recipient.id, data, sent_at=datetime.now(timezone.utc))
-    send_web.delay(notification.id, broadcast_id, org_id, recipient.id, data)
+    send_web.delay(notification.id, recipient.id, data)
 
     if "channels" in data:
         if "sms" in data["channels"] and recipient.phone:
@@ -788,4 +790,4 @@ def route_basic_notification(broadcast_id, org_id, recipient, data):
         if "email" in data["channels"]:
             send_email.delay(notification.id, broadcast_id, org_id, recipient.id, data)
         if "mobile_push" in data["channels"]:
-            send_mobile.delay(notification.id, broadcast_id, org_id, recipient.id, data)
+            send_mobile.delay(notification.id, org_id, recipient.id, data)

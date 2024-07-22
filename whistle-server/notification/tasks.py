@@ -475,6 +475,7 @@ def persist_notification(broadcast_id, org_id, user_id, data, **kwargs):
         notification = Notification.objects.create(
             organization_id=org_id,
             recipient_id=user_id,
+            broadcast_id=broadcast_id,
             category=data.get("category", ""),
             topic=data.get("topic", ""),
             title=data.get("title", ""),

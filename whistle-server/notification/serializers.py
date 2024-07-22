@@ -1,5 +1,4 @@
 from rest_framework import serializers
-from rest_framework.exceptions import ValidationError
 
 from audience.serializers import FilterSerializer
 from external_user.serializers import ExternalUserSerializer
@@ -48,9 +47,18 @@ class ChannelSMSSerializer(serializers.Serializer):
     body = serializers.CharField(max_length=255)
 
 
+class ChannelMobilePushSerializer(serializers.Serializer):
+    title = serializers.CharField(max_length=255)
+    subtitle = serializers.CharField(max_length=255, required=False)
+    body = serializers.CharField(max_length=255)
+    badge = serializers.CharField(max_length=255, required=False)
+    sound = serializers.CharField(max_length=255, required=False)
+
+
 class NotificationChannelsSerializer(serializers.Serializer):
     email = ChannelEmailSerializer(required=False)
     sms = ChannelSMSSerializer(required=False)
+    mobile_push = ChannelMobilePushSerializer(required=False)
 
 
 class NotificationSerializer(serializers.ModelSerializer):
@@ -126,13 +134,13 @@ class BroadcastSerializer(serializers.ModelSerializer):
 
     def validate(self, data):
         if "audience_id" in data and "filters" in data:
-            raise ValidationError(
+            raise serializers.ValidationError(
                 "Cannot use both 'audience_id' and 'filters' together. Please specify only one.",
                 "audience_and_filters_unsupported",
             )
 
         if "audience_id" in data and "recipients" in data:
-            raise ValidationError(
+            raise serializers.ValidationError(
                 "Cannot use both 'audience_id' and 'recipients' together. Please specify only one.",
                 "audience_and_recipients_unsupported",
             )

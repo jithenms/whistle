@@ -18,7 +18,9 @@ class FilterSerializer(serializers.ModelSerializer):
         value_upper = value.upper()
         # Check if the value is a valid choice
         if value_upper not in OperatorChoices.values:
-            raise serializers.ValidationError(f"'{value}' is not a valid choice.")
+            raise serializers.ValidationError(
+                f"'{value}' is not a valid choice for 'operator'.", "invalid_operator"
+            )
         return value_upper
 
 

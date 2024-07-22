@@ -4,6 +4,7 @@ from django.db import models
 
 from external_user.models import ExternalUser
 from organization.models import Organization
+from preference.models import ChannelChoices
 
 
 class Broadcast(models.Model):
@@ -34,3 +35,10 @@ class Notification(models.Model):
     seen_at = models.DateTimeField(null=True, blank=True)
     read_at = models.DateTimeField(null=True, blank=True)
     archived_at = models.DateTimeField(null=True, blank=True)
+
+
+class NotificationChannel(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    notification = models.ForeignKey(Notification, on_delete=models.CASCADE)
+    slug = models.SlugField(choices=ChannelChoices.choices)
+    status = models.CharField(max_length=255)

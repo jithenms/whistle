@@ -3,7 +3,7 @@ import logging
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
 
-from connector.models import Twilio, Sendgrid
+from connector.models import Twilio, Sendgrid, APNS, FCM
 
 
 class TwilioSerializer(serializers.ModelSerializer):
@@ -25,7 +25,9 @@ class TwilioSerializer(serializers.ModelSerializer):
 
         response = super().create(validated_data)
 
-        logging.info("Twilio connection with id: %s created for org: %s", response.id, org.id)
+        logging.info(
+            "Twilio connection with id: %s created for org: %s", response.id, org.id
+        )
 
         return response
 
@@ -49,6 +51,64 @@ class SendgridSerializer(serializers.ModelSerializer):
 
         response = super().create(validated_data)
 
-        logging.info("Sendgrid connection with id: %s created for org: %s", response.id, org.id)
+        logging.info(
+            "Sendgrid connection with id: %s created for org: %s", response.id, org.id
+        )
+
+        return response
+
+
+class APNSSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = APNS
+        fields = ["id", "key_p8", "key_id", "team_id", "use_sandbox"]
+
+    def create(self, validated_data):
+        org = self.context["request"].user
+        validated_data["organization"] = org
+
+        apple_conn = APNS.objects.filter(organization=org)
+
+        if apple_conn:
+            raise ValidationError(
+                "An Apple Push Notification Service account is already connected to your organization.",
+                "apple_connection_exists",
+            )
+
+        response = super().create(validated_data)
+
+        logging.info(
+            "Apple Push Notification Service connection with id: %s created for org: %s",
+            response.id,
+            org.id,
+        )
+
+        return response
+
+
+class FCMSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = FCM
+        fields = ["id", "private_key", "project_id"]
+
+    def create(self, validated_data):
+        org = self.context["request"].user
+        validated_data["organization"] = org
+
+        fcm_conn = FCM.objects.filter(organization=org)
+
+        if fcm_conn:
+            raise ValidationError(
+                "A Firebase Cloud Messaging project is already connected to your organization.",
+                "fcm_connection_exists",
+            )
+
+        response = super().create(validated_data)
+
+        logging.info(
+            "Firebase Cloud Messaging connection with id: %s created for org: %s",
+            response.id,
+            org.id,
+        )
 
         return response

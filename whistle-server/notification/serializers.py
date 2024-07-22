@@ -126,6 +126,7 @@ class BroadcastSerializer(serializers.ModelSerializer):
             "filters",
             "audience_id",
             "schedule_at",
+            "data",
         ]:
             if field in validated_data:
                 validated_data.pop(field)

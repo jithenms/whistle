@@ -16,8 +16,9 @@ COPY whistle-server .
 COPY bin/start-api.sh /usr/local/bin/start-api.sh
 COPY bin/start-websockets.sh /usr/local/bin/start-websockets.sh
 COPY bin/start-worker.sh /usr/local/bin/start-worker.sh
+COPY bin/start-scheduler.sh /usr/local/bin/start-scheduler.sh
 
-RUN chmod +x /usr/local/bin/start-api.sh /usr/local/bin/start-websockets.sh /usr/local/bin/start-worker.sh
-RUN chown django /usr/local/bin/start-api.sh /usr/local/bin/start-websockets.sh /usr/local/bin/start-worker.sh
+RUN chmod +x /usr/local/bin/start-api.sh /usr/local/bin/start-websockets.sh /usr/local/bin/start-worker.sh /usr/local/bin/start-scheduler.sh
+RUN chown django /usr/local/bin/start-api.sh /usr/local/bin/start-websockets.sh /usr/local/bin/start-worker.sh /usr/local/bin/start-scheduler.sh
 
 USER django

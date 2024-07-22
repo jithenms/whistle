@@ -1,5 +1,6 @@
 import logging
 import uuid
+from datetime import datetime, timedelta
 
 from django.http import JsonResponse
 from rest_framework import mixins, status
@@ -21,7 +22,7 @@ from whistle_server.auth import (
     IsValidExternalId,
 )
 from whistle_server.pagination import StandardLimitOffsetPagination
-from .tasks import send_broadcast
+from .tasks import schedule_broadcast, send_broadcast
 
 from drf_spectacular.utils import extend_schema, OpenApiParameter
 
@@ -138,15 +139,26 @@ class BroadcastViewSet(
 
         instance = serializer.save(status="queued")
         try:
-            send_broadcast.delay(
-                broadcast_id, self.request.user.id, serializer.validated_data
-            )
-            logging.info(
-                "Broadcast queued with id: %s for org: %s",
-                broadcast_id,
-                self.request.user.id,
-            )
-        except:
+            schedule_at = serializer.validated_data.get("schedule_at")
+            if schedule_at:
+                schedule_broadcast.delay(
+                    str(broadcast_id),
+                    str(self.request.user.id),
+                    serializer.validated_data,
+                )
+            else:
+                send_broadcast.delay(
+                    str(broadcast_id),
+                    str(self.request.user.id),
+                    serializer.validated_data,
+                )
+                logging.info(
+                    "Broadcast queued with id: %s for org: %s",
+                    broadcast_id,
+                    self.request.user.id,
+                )
+        except Exception as error:
+            logging.debug(error)
             instance.status = "failed"
             instance.save()
             logging.info(

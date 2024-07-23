@@ -33,10 +33,10 @@ class ChannelEmailSerializer(serializers.Serializer):
             if not subject and not content:
                 raise serializers.ValidationError(
                     {
-                        'sendgrid_template_id':
-                            "This field is required if both 'subject' and 'content' are not provided.",
-                        'subject': "This field is required if 'sendgrid_template_id' is not provided.",
-                        'content': "This field is required if 'sendgrid_template_id' is not provided."
+                        'sendgrid_template_id': "The 'sendgrid_template_id' field is required "
+                                                "if both 'subject' and 'content' are not provided.",
+                        'subject': "The 'subject' field is required if 'sendgrid_template_id' is not provided.",
+                        'content': "The 'content' field is required if 'sendgrid_template_id' is not provided."
                     },
                     "invalid_email_params"
                 )
@@ -139,7 +139,7 @@ class BroadcastSerializer(serializers.ModelSerializer):
 
         if "data" in data and "email" not in data.get("channels", {}):
             raise ValidationError(
-                "Cannot use 'data' without specifying a sendgrid template id.",
+                {'data': "The 'data' field requires 'channels.email.sendgrid_template_id' to be specified."},
                 "sendgrid_template_id_unspecified",
             )
 

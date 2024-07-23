@@ -10,9 +10,38 @@ from notification.models import (
 
 
 class ChannelEmailSerializer(serializers.Serializer):
-    subject = serializers.CharField(max_length=255)
-    content = serializers.CharField(max_length=255)
+    subject = serializers.CharField(max_length=255, required=False)
+    content = serializers.CharField(max_length=255, required=False)
     sendgrid_template_id = serializers.CharField(max_length=255, required=False)
+
+    def validate(self, data):
+        subject = data.get('subject')
+        content = data.get('content')
+        sendgrid_template_id = data.get('sendgrid_template_id')
+
+        if not sendgrid_template_id:
+            if subject and not content:
+                raise serializers.ValidationError(
+                    {'content': "You must provide content for the email if using a subject."},
+                    "missing_email_content"
+                )
+            if content and not subject:
+                raise serializers.ValidationError(
+                    {'subject': "You must provide a subject for the email if using content."},
+                    "missing_email_subject"
+                )
+            if not subject and not content:
+                raise serializers.ValidationError(
+                    {
+                        'sendgrid_template_id':
+                            "This field is required if both 'subject' and 'content' are not provided.",
+                        'subject': "This field is required if 'sendgrid_template_id' is not provided.",
+                        'content': "This field is required if 'sendgrid_template_id' is not provided."
+                    },
+                    "invalid_email_params"
+                )
+
+        return data
 
 
 class ChannelSMSSerializer(serializers.Serializer):

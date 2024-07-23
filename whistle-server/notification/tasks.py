@@ -414,7 +414,7 @@ def send_sms(notification_id, broadcast_id, org_id, user_id, data):
 
         NotificationChannel.objects.create(notification_id=notification_id,
                                            slug=ChannelChoices.SMS, status=status, reason=reason,
-                                           metadata={'twilio_uri': message.uri})
+                                           metadata={'twilio_message_sid': message.sid})
 
         return message.sid
     except TwilioRestException as error:

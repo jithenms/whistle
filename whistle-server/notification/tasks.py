@@ -3,14 +3,14 @@ from datetime import datetime, timezone, timedelta
 import logging
 
 from asgiref.sync import async_to_sync
-from celery import chord, shared_task
+from celery import chord
 from celery.schedules import schedule
 from channels.layers import get_channel_layer
 from django.conf import settings
 from django.db import DatabaseError, transaction
 from python_http_client import HTTPError
 from redbeat import RedBeatSchedulerEntry
-from sendgrid import SendGridAPIClient, Email, To, Content, Mail
+from sendgrid import SendGridAPIClient, Email, To, Content, Mail, MailSettings, SandBoxMode
 from twilio.base.exceptions import TwilioRestException
 from twilio.rest import Client
 
@@ -43,7 +43,9 @@ def schedule_broadcast(broadcast_id, org_id, data):
             entry.name = broadcast_id
             entry.task = "notification.tasks.send_broadcast"
             entry.args = [broadcast_id, org_id, data]
-            entry.schedule = schedule(max(schedule_at - datetime.now(tz=schedule_at.tzinfo), timedelta(0)))
+            entry.schedule = schedule(
+                max(schedule_at - datetime.now(tz=schedule_at.tzinfo), timedelta(0))
+            )
             entry.save()
             broadcast.scheduled_at = schedule_at
             broadcast.status = "scheduled"
@@ -140,7 +142,9 @@ def send_broadcast(broadcast_id, org_id, data):
         try:
             entry = RedBeatSchedulerEntry.from_key(f"redbeat:{broadcast_id}", app=app)
             entry.delete()
-            logging.info("Removed scheduled task after invoking for broadcast: %s", broadcast_id)
+            logging.info(
+                "Removed scheduled task after invoking for broadcast: %s", broadcast_id
+            )
         except KeyError:
             pass
 
@@ -405,7 +409,7 @@ def send_sms(broadcast_id, org_id, user_id, data):
 
         logging.info("twilio sms status: %s", message.status)
 
-        return message
+        return message.sid
     except TwilioRestException as error:
         logging.error(
             "Twilio failed to send text to user: %s for broadcast: %s with message: ",
@@ -444,14 +448,27 @@ def send_email(broadcast_id, org_id, user_id, data):
 
         from_email = Email(sendgrid_conn.from_email)
         to_email = To(user.email)
-        subject = data["channels"]["email"]["subject"]
-        content = Content("text/plain", data["channels"]["email"]["content"])
-        mail = Mail(from_email, to_email, subject, content)
-        response = sg.client.mail.send.post(request_body=mail.get())
+
+        mail = Mail(from_email, to_email)
+
+        mail_settings = MailSettings()
+        mail_settings.sandbox_mode = SandBoxMode(settings.USE_SENDGRID_SANDBOX)
+        mail.mail_settings = mail_settings
+
+        if "sendgrid_template_id" in data["channels"]["email"]:
+            mail.dynamic_template_data = data["data"]
+            mail.template_id = data["channels"]["email"]["sendgrid_template_id"]
+        else:
+            mail.subject = data["channels"]["email"]["subject"]
+            mail.content = Content("text/plain", data["channels"]["email"]["content"])
+        response = sg.send(mail)
         logging.info(
-            "Sendgrid email sent to user: %s with broadcast: %s", user_id, broadcast_id
+            "Sendgrid email with status code: %s sent to user: %s with broadcast: %s",
+            response.status_code,
+            user_id,
+            broadcast_id,
         )
-        return response
+        return response.headers['X-Message-ID']
     except HTTPError as error:
         logging.error(
             "Sendgrid failed to send email to user: %s for broadcast: %s with reason: ",
@@ -530,7 +547,6 @@ def persist_notification(broadcast_id, org_id, user_id, data, **kwargs):
             title=data.get("title", ""),
             content=data.get("content", ""),
             action_link=data.get("action_link", ""),
-            additional_info=data.get("additional_info"),
             **kwargs,
         )
 
@@ -544,29 +560,6 @@ def persist_notification(broadcast_id, org_id, user_id, data, **kwargs):
     except DatabaseError as error:
         logging.error(
             "Failed to save notification record to database for user: %s "
-            "and org: %s for broadcast: %s with database error: %s",
-            user_id,
-            org_id,
-            broadcast_id,
-            error,
-        )
-        raise
-    try:
-        broadcast = Broadcast.objects.get(pk=broadcast_id)
-        external_user = ExternalUser.objects.get(pk=user_id)
-        broadcast.recipients.add(external_user)
-
-        logging.info(
-            "External user: %s added to broadcast: %s in org: %s",
-            user_id,
-            broadcast_id,
-            org_id,
-        )
-
-        return notification.id
-    except DatabaseError as error:
-        logging.error(
-            "Failed to add notification record to broadcast for user: %s "
             "and org: %s for broadcast: %s with database error: %s",
             user_id,
             org_id,
@@ -599,15 +592,20 @@ def update_broadcast(delivered_to, broadcast_id, org_id, data, status):
 
 def update_or_create_external_user(broadcast_id, org_id, recipient, data):
     if "external_id" in recipient:
+        defaults = {}
+        if "first_name" in recipient:
+            defaults["first_name"] = recipient["first_name"]
+        if "last_name" in recipient:
+            defaults["last_name"] = recipient["last_name"]
+        if "email" in recipient:
+            defaults["email"] = recipient["email"]
+        if "phone" in recipient:
+            defaults["phone"] = recipient["phone"]
+
         recipient_entity, created = ExternalUser.objects.update_or_create(
             organization_id=org_id,
             external_id=recipient["external_id"],
-            defaults={
-                "first_name": recipient.get("first_name", ""),
-                "last_name": recipient.get("last_name", ""),
-                "email": recipient.get("email", ""),
-                "phone": recipient.get("phone", ""),
-            },
+            defaults=defaults,
         )
 
         if created and "channels" in data:

@@ -206,3 +206,4 @@ REDBEAT_REDIS_USE_SSL = True if os.environ.get("SSL_MODE") == "enable" else Fals
 
 WHISTLE_SECRET_KEY = os.getenv("WHISTLE_SECRET_KEY")
 WHISTLE_JWKS_ENDPOINT = os.getenv("WHISTLE_JWKS_ENDPOINT")
+USE_SENDGRID_SANDBOX = bool(os.getenv("USE_SENDGRID_SANDBOX", 0))

@@ -56,10 +56,6 @@ class ChannelMobilePushSerializer(serializers.Serializer):
     sound = serializers.CharField(max_length=255, required=False)
 
 
-class NotificationChannelsSerializer(serializers.Serializer):
-    email = ChannelEmailSerializer(required=False)
-    sms = ChannelSMSSerializer(required=False)
-    mobile_push = ChannelMobilePushSerializer(required=False)
 class NotificationChannelSerializer(serializers.ModelSerializer):
     class Meta:
         model = NotificationChannel
@@ -115,23 +111,6 @@ class NotificationSerializer(serializers.ModelSerializer):
         return super().update(instance, validated_data)
 
 
-class ChannelEmailSerializer(serializers.Serializer):
-    subject = serializers.CharField(max_length=255)
-    content = serializers.CharField(max_length=255)
-
-
-class ChannelSMSSerializer(serializers.Serializer):
-    body = serializers.CharField(max_length=255)
-
-
-class ChannelMobilePushSerializer(serializers.Serializer):
-    title = serializers.CharField(max_length=255)
-    subtitle = serializers.CharField(max_length=255, required=False)
-    body = serializers.CharField(max_length=255)
-    badge = serializers.CharField(max_length=255, required=False)
-    sound = serializers.CharField(max_length=255, required=False)
-
-
 class BroadcastChannelSerializer(serializers.Serializer):
     email = ChannelEmailSerializer(required=False)
     sms = ChannelSMSSerializer(required=False)
@@ -144,11 +123,9 @@ class BroadcastSerializer(serializers.ModelSerializer):
     schedule_at = serializers.DateTimeField(required=False)
     audience_id = serializers.UUIDField(required=False, write_only=True)
     filters = FilterSerializer(many=True, required=False, write_only=True)
-    channels = NotificationChannelsSerializer(required=False)
-    additional_info = serializers.JSONField(required=False, default=dict)
-    data = serializers.JSONField(required=False, default=dict)
     channels = BroadcastChannelSerializer(required=False)
     additional_info = serializers.JSONField(required=False, default=dict)
+    data = serializers.JSONField(required=False, write_only=True, default=dict)
     metadata = serializers.JSONField(read_only=True, default=dict)
 
     class Meta:
@@ -212,7 +189,6 @@ class BroadcastSerializer(serializers.ModelSerializer):
                 )
 
         data['metadata'] = {}
-
 
         if "data" in data and "email" not in data.get("channels", {}):
             raise serializers.ValidationError(

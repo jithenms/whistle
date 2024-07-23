@@ -486,6 +486,7 @@ def send_web(notification_id, user_id, data):
                 "title": data["title"],
                 "content": data["content"],
                 "action_link": data.get("action_link", ""),
+                "additional_info": data.get("additional_info", {})
             },
         },
     )
@@ -597,7 +598,6 @@ def persist_notification(broadcast_id, org_id, user_id, data, **kwargs):
         title=data.get("title", ""),
         content=data.get("content", ""),
         action_link=data.get("action_link", ""),
-        additional_info=data.get("additional_info"),
         **kwargs,
     )
 

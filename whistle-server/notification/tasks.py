@@ -7,7 +7,7 @@ from celery import chord
 from celery.schedules import schedule
 from channels.layers import get_channel_layer
 from django.conf import settings
-from django.db import DatabaseError, transaction
+from django.db import transaction
 from pyapns_client import IOSPayloadAlert, IOSPayload, IOSNotification, APNSClient, APNSException
 from python_http_client import HTTPError
 from redbeat import RedBeatSchedulerEntry
@@ -34,7 +34,7 @@ basic_fields = {
 }
 
 
-@app.task(throws=(DatabaseError,))
+@app.task
 def schedule_broadcast(broadcast_id, org_id, data):
     broadcast = Broadcast.objects.get(pk=uuid.UUID(broadcast_id))
     try:
@@ -102,34 +102,28 @@ def send_broadcast(broadcast_id, org_id, data):
         if "filters" in data:
             recipients_to_remove = []
             for recipient in data["recipients"]:
-                try:
-                    recipient_entity = update_or_create_external_user(
-                        broadcast_id, org_id, recipient, data
-                    )
-                    if recipient_entity:
-                        for filter_input in data["filters"]:
-                            filtered = apply_filter_to_recipient(
-                                broadcast_id, org_id, filter_input, recipient_entity
-                            )
-                            if filtered:
-                                recipients_to_remove.append(recipient)
-                except NotificationException:
-                    continue
-            for recipient in recipients_to_remove:
-                data["recipients"].remove(recipient)
-
-        for recipient in data["recipients"]:
-            try:
                 recipient_entity = update_or_create_external_user(
                     broadcast_id, org_id, recipient, data
                 )
                 if recipient_entity:
-                    tasks.append(
-                        handle_recipient.s(broadcast_id, org_id, recipient_entity.id, data)
-                    )
-                    recipient_ids.add(recipient_entity.id)
-            except NotificationException:
-                continue
+                    for filter_input in data["filters"]:
+                        filtered = apply_filter_to_recipient(
+                            broadcast_id, org_id, filter_input, recipient_entity
+                        )
+                        if filtered:
+                            recipients_to_remove.append(recipient)
+            for recipient in recipients_to_remove:
+                data["recipients"].remove(recipient)
+
+        for recipient in data["recipients"]:
+            recipient_entity = update_or_create_external_user(
+                broadcast_id, org_id, recipient, data
+            )
+            if recipient_entity:
+                tasks.append(
+                    handle_recipient.s(broadcast_id, org_id, recipient_entity.id, data)
+                )
+                recipient_ids.add(recipient_entity.id)
 
     if "topic" in data:
         subscribers = ExternalUserSubscription.objects.filter(
@@ -427,6 +421,7 @@ def send_sms(notification_id, broadcast_id, org_id, user_id, data):
         reason = f'{error.status}: {error.msg}'
         NotificationChannel.objects.create(notification_id=notification_id,
                                            slug=ChannelChoices.EMAIL, status="failed", reason=reason)
+        raise
 
 
 @app.task
@@ -473,6 +468,7 @@ def send_email(notification_id, broadcast_id, org_id, user_id, data):
         )
         NotificationChannel.objects.create(notification_id=notification_id,
                                            slug=ChannelChoices.EMAIL, status="failed", reason=error.reason)
+        raise
 
 
 @app.task
@@ -572,7 +568,6 @@ def send_mobile(notification_id, org_id, user_id, data):
                 res = notification.notify(fcm_token=device.token,
                                           notification_title=data['channels']['mobile_push']['title'],
                                           notification_body=data['channels']['mobile_push']['body'])
-                logging.info(res)
                 logging.info(
                     "Firebase cloud messaging notification sent for user: %s with response: %s",
                     user_id,
@@ -637,13 +632,13 @@ def update_or_create_external_user(broadcast_id, org_id, recipient, data):
 
         if created and "channels" in data:
             if "email" in data["channels"] and "email" not in recipient:
-                logging.error(
+                logging.info(
                     "Email included in channels but email not provided for new user for org: %s and broadcast: %s",
                     org_id,
                     broadcast_id,
                 )
             if "sms" in data["channels"] and "phone" not in recipient:
-                logging.error(
+                logging.info(
                     "SMS included in channels but phone not provided for new user for org: %s and broadcast: %s",
                     org_id,
                     broadcast_id,
@@ -657,7 +652,7 @@ def update_or_create_external_user(broadcast_id, org_id, recipient, data):
                 organization_id=org_id, email=recipient["email"]
             )
         except ExternalUser.DoesNotExist:
-            logging.error(
+            logging.debug(
                 "Recipient not found by email for org: %s and broadcast: %s",
                 org_id,
                 broadcast_id,

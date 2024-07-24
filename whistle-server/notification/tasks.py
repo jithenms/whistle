@@ -9,6 +9,7 @@ from channels.layers import get_channel_layer
 from django.conf import settings
 from django.db import transaction
 from pyapns_client import IOSPayloadAlert, IOSPayload, IOSNotification, APNSClient, APNSException
+from pyfcm.errors import AuthenticationError, FCMServerError, InvalidDataError, InternalPackageError
 from python_http_client import HTTPError
 from redbeat import RedBeatSchedulerEntry
 from sendgrid import SendGridAPIClient, Email, To, Content, Mail, MailSettings, SandBoxMode
@@ -23,7 +24,6 @@ from preference.models import ExternalUserPreference, ChannelChoices
 from subscription.models import ExternalUserSubscription
 from whistle_server.celery import app
 from whistle_server.client import CustomAPNSClient, CustomFCMNotification
-from whistle_server.exceptions import NotificationException
 
 basic_fields = {
     "email",
@@ -549,33 +549,67 @@ def send_mobile(notification_id, org_id, user_id, data):
                         res,
                     )
                     NotificationChannel.objects.create(notification_id=notification_id,
-                                                       slug=ChannelChoices.MOBILE_PUSH, status="sent")
+                                                       slug=ChannelChoices.MOBILE_PUSH, status="sent",
+                                                       metadata={
+                                                            'platform': PlatformChoices.IOS.value
+                                                       })
+
                 except APNSException as error:
                     logging.info(
-                        "Failed to send Apple push notification sent for user: %s with error: %s",
+                        "Failed to send Apple push notification sent for user: %s with status code: %s and apns_id: %s",
                         user_id,
-                        error,
+                        error.status_code,
+                        error.apns_id
                     )
                     NotificationChannel.objects.create(notification_id=notification_id,
-                                                       slug=ChannelChoices.MOBILE_PUSH, status="failed")
+                                                       slug=ChannelChoices.MOBILE_PUSH, status="failed",
+                                                       reason=f"APNS error with status code: {error.status_code} "
+                                                              f"and apns_id: {error.apns_id}",
+                                                       metadata={
+                                                        'platform': PlatformChoices.IOS.value,
+                                                        'apns_id': error.apns_id
+                                                       })
             case PlatformChoices.ANDROID:
                 if not fcm:
                     NotificationChannel.objects.create(notification_id=notification_id,
                                                        slug=ChannelChoices.MOBILE_PUSH,
                                                        status="not_sent", reason="FCM account not configured")
                     continue
-                notification = CustomFCMNotification(service_account_file=fcm.first().credentials,
-                                                     project_id=fcm.first().project_id)
-                res = notification.notify(fcm_token=device.token,
-                                          notification_title=data['channels']['mobile_push']['title'],
-                                          notification_body=data['channels']['mobile_push']['body'])
-                logging.info(
-                    "Firebase cloud messaging notification sent for user: %s with response: %s",
-                    user_id,
-                    res,
-                )
-                NotificationChannel.objects.create(notification_id=notification_id,
-                                                   slug=ChannelChoices.MOBILE_PUSH, status="sent")
+                try:
+                    notification = CustomFCMNotification(service_account_file=fcm.first().credentials,
+                                                         project_id=fcm.first().project_id)
+                    res = notification.notify(fcm_token=device.token,
+                                              notification_title=data['channels']['mobile_push']['title'],
+                                              notification_body=data['channels']['mobile_push']['body'])
+                    logging.info(
+                        "Firebase cloud messaging notification sent for user: %s with response: %s",
+                        user_id,
+                        res,
+                    )
+                    NotificationChannel.objects.create(notification_id=notification_id,
+                                                       slug=ChannelChoices.MOBILE_PUSH, status="sent", metadata={
+                            'platform': PlatformChoices.ANDROID.value
+                        })
+                except (AuthenticationError, FCMServerError, InvalidDataError, InternalPackageError) as e:
+                    reasons = {
+                        AuthenticationError: "FCM API key not found or there was an error authenticating the sender",
+                        FCMServerError: "Internal server error or timeout error on Firebase cloud messaging server",
+                        InvalidDataError: "FCM Invalid input",
+                        InternalPackageError: "Mostly from changes in the response of FCM, contact the project owner "
+                                              "to resolve the issue"
+                    }
+                    reason = reasons.get(type(e), "Unknown error")
+                    logging.info("Firebase cloud messaging notification failed to send for user: %s with reason: %s",
+                                 user_id, reason)
+                    NotificationChannel.objects.create(
+                        notification_id=notification_id,
+                        slug=ChannelChoices.MOBILE_PUSH,
+                        status="failed",
+                        reason=reason,
+                        metadata={
+                            'platform': PlatformChoices.ANDROID.value
+                        }
+                    )
             case _:
                 continue
 

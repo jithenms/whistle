@@ -2,7 +2,6 @@ import logging
 
 from django.db import transaction
 from rest_framework import serializers
-from rest_framework.exceptions import ValidationError
 
 from external_user.models import ExternalUser
 from subscription.models import (
@@ -40,7 +39,12 @@ class ExternalUserSubscriptionSerializer(serializers.ModelSerializer):
                         user_subscription=user_subscription, **cat
                     )
 
-                logging.info("Subscription with id: %s created for user: %s in org: %s", user_subscription.id, external_user.id, org.id)
+                logging.info(
+                    "Subscription with id: %s created for user: %s in org: %s",
+                    user_subscription.id,
+                    external_user.id,
+                    org.id,
+                )
 
                 return user_subscription
         except ExternalUser.DoesNotExist:
@@ -49,7 +53,7 @@ class ExternalUserSubscriptionSerializer(serializers.ModelSerializer):
                 external_id,
                 self.request.user.id,
             )
-            raise ValidationError(
+            raise serializers.ValidationError(
                 "Invalid External Id. Please provide a valid External Id in the request header.",
                 "invalid_external_id",
             )
@@ -64,18 +68,25 @@ class ExternalUserSubscriptionSerializer(serializers.ModelSerializer):
 
             if self.partial:
                 for category in category_data:
-                    ExternalUserSubscriptionCategory.objects.update_or_create(user_subscription=instance,
-                                                                              slug=category.get('slug'),
-                                                                              defaults={'description':
-                                                                                            category.get(
-                                                                                                'description')
-                                                                                        })
+                    ExternalUserSubscriptionCategory.objects.update_or_create(
+                        user_subscription=instance,
+                        slug=category.get("slug"),
+                        defaults={"description": category.get("description")},
+                    )
             else:
-                ExternalUserSubscriptionCategory.objects.filter(user_subscription=instance).delete()
+                ExternalUserSubscriptionCategory.objects.filter(
+                    user_subscription=instance
+                ).delete()
                 for category in category_data:
-                    ExternalUserSubscriptionCategory.objects.create(user_preference=instance, **category)
+                    ExternalUserSubscriptionCategory.objects.create(
+                        user_preference=instance, **category
+                    )
 
-            logging.info("Subscription with id: %s updated for user: %s in org: %s", instance.id,
-                         instance.user.id, org.id)
+            logging.info(
+                "Subscription with id: %s updated for user: %s in org: %s",
+                instance.id,
+                instance.user.id,
+                org.id,
+            )
 
             return instance

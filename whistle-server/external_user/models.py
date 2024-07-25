@@ -17,11 +17,30 @@ class ExternalUser(models.Model):
     metadata = models.JSONField(null=True, blank=True)
 
     class Meta:
-        unique_together = [['organization', 'email'], ['organization', 'phone'], ['organization', 'external_id']]
+        unique_together = [
+            ["organization", "email"],
+            ["organization", "phone"],
+            ["organization", "external_id"],
+        ]
 
     def delete(self, using=None, keep_parents=False):
         response = super().delete(using, keep_parents)
-        logging.info("External user with id: %s deleted for org: %s", self.id, self.organization.id)
+        logging.info(
+            "External user with id: %s deleted for org: %s",
+            self.id,
+            self.organization.id,
+        )
         return response
 
 
+class PlatformChoices(models.TextChoices):
+    IOS = "IOS", "IOS"
+    ANDROID = "ANDROID", "ANDROID"
+
+
+class ExternalUserDevice(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(ExternalUser, on_delete=models.CASCADE)
+    bundle_id = models.CharField(blank=True, unique=True)
+    token = models.CharField(max_length=255, unique=True)
+    platform = models.CharField(max_length=255, choices=PlatformChoices.choices)

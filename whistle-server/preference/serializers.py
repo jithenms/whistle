@@ -2,7 +2,6 @@ import logging
 
 from django.db import transaction
 from rest_framework import serializers
-from rest_framework.exceptions import ValidationError
 
 from external_user.models import ExternalUser
 from preference.models import (
@@ -24,7 +23,9 @@ class ExternalUserPreferenceChannelSerializer(serializers.ModelSerializer):
         value_upper = value.upper()
         # Check if the value is a valid choice
         if value_upper not in ChannelChoices.values:
-            raise ValidationError(f"'{value}' is not a valid choice.")
+            raise serializers.ValidationError(
+                f"'{value}' is not a valid 'slug'.", "invalid_slug"
+            )
         return value_upper
 
 
@@ -41,7 +42,7 @@ class ExternalUserPreferenceSerializer(serializers.ModelSerializer):
         try:
             with transaction.atomic():
                 channels_data = validated_data.pop("channels", [])
-                external_user = ExternalUser.objects.get(external_id=external_id)
+                external_user = ExternalUser.objects.get(organization=org, external_id=external_id)
 
                 user_preference = ExternalUserPreference.objects.create(
                     organization=org, user=external_user, slug=validated_data["slug"]
@@ -77,7 +78,7 @@ class ExternalUserPreferenceSerializer(serializers.ModelSerializer):
                 external_id,
                 org.id,
             )
-            raise ValidationError(
+            raise serializers.ValidationError(
                 "Invalid External Id. Please provide a valid External Id in the request header.",
                 "invalid_external_id",
             )

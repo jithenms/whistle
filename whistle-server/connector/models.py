@@ -18,3 +18,19 @@ class Sendgrid(models.Model):
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE)
     from_email = models.CharField(max_length=255, unique=True)
     api_key = models.CharField(max_length=255, unique=True)
+
+
+class APNS(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE)
+    key_p8 = models.TextField()
+    key_id = models.CharField(max_length=255, unique=True)
+    team_id = models.CharField(max_length=255)
+    use_sandbox = models.BooleanField(default=False)
+
+
+class FCM(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE)
+    credentials = models.TextField()
+    project_id = models.CharField(max_length=255, unique=True)

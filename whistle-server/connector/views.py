@@ -1,7 +1,12 @@
 from rest_framework.viewsets import ModelViewSet
 
 from connector.models import Twilio, Sendgrid, APNS, FCM
-from connector.serializers import TwilioSerializer, SendgridSerializer, APNSSerializer, FCMSerializer
+from connector.serializers import (
+    TwilioSerializer,
+    SendgridSerializer,
+    APNSSerializer,
+    FCMSerializer,
+)
 from whistle_server.auth import ServerAuth
 
 

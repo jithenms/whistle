@@ -1,8 +1,8 @@
 import logging
 import uuid
-from datetime import datetime, timedelta
 
 from django.http import JsonResponse
+from drf_spectacular.utils import extend_schema, OpenApiParameter
 from rest_framework import mixins, status
 from rest_framework.exceptions import ValidationError
 from rest_framework.generics import CreateAPIView
@@ -23,8 +23,6 @@ from whistle_server.auth import (
 )
 from whistle_server.pagination import StandardLimitOffsetPagination
 from .tasks import schedule_broadcast, send_broadcast
-
-from drf_spectacular.utils import extend_schema, OpenApiParameter
 
 
 class NotificationViewSet(

@@ -30,13 +30,21 @@ from subscription.views import ExternalUserSubscriptionViewSet
 v1_router = DefaultRouter()
 v1_router.register(r"organizations", OrganizationViewSet, basename="organizations")
 v1_router.register(r"users", ExternalUserViewSet, basename="external_users")
-v1_router.register(r"devices", ExternalUserDeviceViewSet, basename="external_users_devices")
-v1_router.register(r"preferences", ExternalUserPreferenceViewSet, basename="preferences")
-v1_router.register(r"subscriptions", ExternalUserSubscriptionViewSet, basename="subscriptions")
+v1_router.register(
+    r"devices", ExternalUserDeviceViewSet, basename="external_users_devices"
+)
+v1_router.register(
+    r"preferences", ExternalUserPreferenceViewSet, basename="preferences"
+)
+v1_router.register(
+    r"subscriptions", ExternalUserSubscriptionViewSet, basename="subscriptions"
+)
 v1_router.register(r"broadcasts", BroadcastViewSet, basename="broadcasts")
 v1_router.register(r"notifications", NotificationViewSet, basename="notifications")
 v1_router.register(r"connectors/twilio", TwilioViewSet, basename="connectors.twilio")
-v1_router.register(r"connectors/sendgrid", SendgridViewSet, basename="connectors.sendgrid")
+v1_router.register(
+    r"connectors/sendgrid", SendgridViewSet, basename="connectors.sendgrid"
+)
 v1_router.register(r"connectors/apns", APNSViewSet, basename="connectors.apns")
 v1_router.register(r"connectors/fcm", FCMViewSet, basename="connectors.fcm")
 v1_router.register(r"audiences", AudienceViewSet, basename="audiences")

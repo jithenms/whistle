@@ -71,7 +71,9 @@ class ExternalUserDeviceSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         org = self.context["request"].user
         external_id = self.context.get("external_id")
-        external_user = ExternalUser.objects.get(organization=org, external_id=external_id)
-        validated_data['user'] = external_user
+        external_user = ExternalUser.objects.get(
+            organization=org, external_id=external_id
+        )
+        validated_data["user"] = external_user
         response = super().create(validated_data)
         return response

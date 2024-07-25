@@ -12,8 +12,8 @@ https://docs.djangoproject.com/en/5.0/ref/settings/
 
 import logging
 import os
-from socket import gethostbyname, gethostname
 from pathlib import Path
+from socket import gethostbyname, gethostname
 
 import sentry_sdk
 from dotenv import load_dotenv, find_dotenv
@@ -87,8 +87,6 @@ REST_FRAMEWORK = {
     "EXCEPTION_HANDLER": "whistle_server.exceptions.custom_exception_handler",
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
 }
-
-import whistle_server.schema
 
 SPECTACULAR_SETTINGS = {
     "TITLE": "Whistle API",

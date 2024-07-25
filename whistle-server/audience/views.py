@@ -1,5 +1,3 @@
-import logging
-
 from rest_framework.viewsets import ModelViewSet
 
 from audience.models import Audience

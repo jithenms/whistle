@@ -88,9 +88,7 @@ class ServerAuth(BaseAuthentication):
                     else:
                         return org, None
                 except Organization.DoesNotExist:
-                    logging.debug(
-                        "API key invalid."
-                    )
+                    logging.debug("API key invalid.")
                     raise AuthenticationFailed(
                         "API key invalid. You can find your API key in Whistle settings.",
                         "invalid_api_key",
@@ -125,9 +123,7 @@ class ClientAuth(BaseAuthentication):
 
                 return org, None
             except jwt.PyJWTError:
-                logging.debug(
-                    "Access token invalid."
-                )
+                logging.debug("Access token invalid.")
                 raise AuthenticationFailed(
                     "The provided access token is invalid. Please provide a valid access token.",
                     "invalid_access_token",
@@ -139,9 +135,7 @@ class ClientAuth(BaseAuthentication):
                 org = Organization.objects.get(api_key_hash=api_key_hash)
                 return org, None
             except Organization.DoesNotExist:
-                logging.debug(
-                    "Invalid API Key provided"
-                )
+                logging.debug("Invalid API Key provided")
                 raise AuthenticationFailed(
                     "API key invalid. You can find your API key in Whistle settings.",
                     "invalid_api_key",
@@ -233,9 +227,11 @@ def update_or_create_organization_member(data, user, org):
     )
 
     if org_member_created:
-        logging.info("New organization member with clerk id: %s in clerk org: %s synced.",
-                     user.clerk_user_id,
-                     org.clerk_org_id)
+        logging.info(
+            "New organization member with clerk id: %s in clerk org: %s synced.",
+            user.clerk_user_id,
+            org.clerk_org_id,
+        )
 
     return org_member
 

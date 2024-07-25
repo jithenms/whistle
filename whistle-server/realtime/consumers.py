@@ -30,11 +30,11 @@ class NotificationConsumer(AsyncWebsocketConsumer):
 
     async def disconnect(self, close_code):
         if (
-                "org" in self.scope
-                and "external_user" in self.scope
-                and "api_key" in self.scope
+            "org" in self.scope
+            and "external_user" in self.scope
+            and "api_key" in self.scope
         ):
-            org = self.scope['org']
+            org = self.scope["org"]
             external_user = self.scope["external_user"]
             await self.channel_layer.group_discard(
                 f"user_{external_user.id}", self.channel_name

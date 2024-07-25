@@ -67,7 +67,7 @@ def custom_exception_handler(exc, context):
                 "The record you are trying to create violates a unique constraint. Please ensure your request does not "
                 "contain existing identifiers or slugs.",
             )
-    
+
     logging.info("Unrecognized exception: %s", exc)
 
     return generate_error_response(

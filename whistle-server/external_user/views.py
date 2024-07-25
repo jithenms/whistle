@@ -4,13 +4,17 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.viewsets import ModelViewSet
 
 from external_user.models import (
-    ExternalUser, ExternalUserDevice,
+    ExternalUser,
+    ExternalUserDevice,
 )
 from external_user.serializers import (
-    ExternalUserSerializer, ExternalUserDeviceSerializer,
+    ExternalUserSerializer,
+    ExternalUserDeviceSerializer,
 )
 from whistle_server.auth import (
-    ServerAuth, ClientAuth, IsValidExternalId,
+    ServerAuth,
+    ClientAuth,
+    IsValidExternalId,
 )
 from whistle_server.pagination import StandardLimitOffsetPagination
 
@@ -32,7 +36,9 @@ class ExternalUserDeviceViewSet(ModelViewSet):
     permission_classes = [IsValidExternalId]
 
     def get_queryset(self):
-        external_id = self.request.headers.get("X-External-Id") if self.request else None
+        external_id = (
+            self.request.headers.get("X-External-Id") if self.request else None
+        )
         try:
             user = ExternalUser.objects.get(
                 external_id=external_id,
@@ -54,4 +60,3 @@ class ExternalUserDeviceViewSet(ModelViewSet):
         context = super().get_serializer_context()
         context.update({"external_id": self.request.headers.get("X-External-Id")})
         return context
-

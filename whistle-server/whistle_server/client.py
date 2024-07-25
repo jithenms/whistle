@@ -1,6 +1,6 @@
 import json
 
-from google.auth.transport import Request
+import google
 from google.oauth2 import service_account
 from pyapns_client import APNSClient
 from pyfcm import FCMNotification
@@ -18,12 +18,12 @@ class CustomFCMNotification(FCMNotification):
         try:
             if self.service_account_file:
                 credentials = service_account.Credentials.from_service_account_info(
-                    json.loads(self.service_account_file),
+                    json.loads(self.service_account_file, strict=False),
                     scopes=["https://www.googleapis.com/auth/firebase.messaging"],
                 )
             else:
                 credentials = self.credentials
-            request = Request()
+            request = google.auth.transport.requests.Request()
             credentials.refresh(request)
             return credentials.token
         except Exception as e:

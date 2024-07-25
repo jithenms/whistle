@@ -8,11 +8,25 @@ from celery.schedules import schedule
 from channels.layers import get_channel_layer
 from django.conf import settings
 from django.db import transaction
-from pyapns_client import IOSPayloadAlert, IOSPayload, IOSNotification, APNSClient, APNSException
-from pyfcm.errors import AuthenticationError, FCMServerError, InvalidDataError, InternalPackageError
+from pyapns_client import (
+    IOSPayloadAlert,
+    IOSPayload,
+    IOSNotification,
+    APNSClient,
+    APNSException,
+)
+from pyfcm.errors import FCMError
 from python_http_client import HTTPError
 from redbeat import RedBeatSchedulerEntry
-from sendgrid import SendGridAPIClient, Email, To, Content, Mail, MailSettings, SandBoxMode
+from sendgrid import (
+    SendGridAPIClient,
+    Email,
+    To,
+    Content,
+    Mail,
+    MailSettings,
+    SandBoxMode,
+)
 from twilio.base.exceptions import TwilioRestException
 from twilio.rest import Client
 
@@ -94,9 +108,7 @@ def send_broadcast(broadcast_id, org_id, data):
         logging.info(f"Recipients: {recipients}")
 
         for recipient in recipients.iterator():
-            tasks.append(
-                handle_recipient.s(broadcast_id, org_id, recipient.id, data)
-            )
+            tasks.append(handle_recipient.s(broadcast_id, org_id, recipient.id, data))
             recipient_ids.add(recipient.id)
     elif "recipients" in data:
         if "filters" in data:
@@ -201,14 +213,14 @@ def apply_filter_to_recipient(broadcast_id, org_id, filter_input, recipient_enti
                     return True
                 try:
                     if datetime.strptime(
-                            getattr(recipient_entity, filter_input["property"]),
-                            settings.DATETIME_FORMAT,
+                        getattr(recipient_entity, filter_input["property"]),
+                        settings.DATETIME_FORMAT,
                     ) != datetime.strptime(filter_input["value"]):
                         return True
                 except ValueError:
                     if (
-                            getattr(recipient_entity, filter_input["property"])
-                            != filter_input["value"]
+                        getattr(recipient_entity, filter_input["property"])
+                        != filter_input["value"]
                     ):
                         return True
         case OperatorChoices.NEQ.value:
@@ -218,14 +230,14 @@ def apply_filter_to_recipient(broadcast_id, org_id, filter_input, recipient_enti
                     return True
                 try:
                     if datetime.strptime(
-                            getattr(recipient_entity, filter_input["property"]),
-                            settings.DATETIME_FORMAT,
+                        getattr(recipient_entity, filter_input["property"]),
+                        settings.DATETIME_FORMAT,
                     ) == datetime.strptime(filter_input["value"]):
                         return True
                 except ValueError:
                     if (
-                            getattr(recipient_entity, filter_input["property"])
-                            == filter_input["value"]
+                        getattr(recipient_entity, filter_input["property"])
+                        == filter_input["value"]
                     ):
                         return True
         case OperatorChoices.GT.value:
@@ -235,8 +247,8 @@ def apply_filter_to_recipient(broadcast_id, org_id, filter_input, recipient_enti
             else:
                 try:
                     if datetime.strptime(
-                            metadata.get(filter_input["property"]),
-                            settings.DATETIME_FORMAT,
+                        metadata.get(filter_input["property"]),
+                        settings.DATETIME_FORMAT,
                     ) <= datetime.strptime(filter_input["value"]):
                         return True
                 except ValueError:
@@ -249,8 +261,8 @@ def apply_filter_to_recipient(broadcast_id, org_id, filter_input, recipient_enti
             else:
                 try:
                     if datetime.strptime(
-                            metadata.get(filter_input["property"]),
-                            settings.DATETIME_FORMAT,
+                        metadata.get(filter_input["property"]),
+                        settings.DATETIME_FORMAT,
                     ) >= datetime.strptime(filter_input["value"]):
                         return True
                 except ValueError:
@@ -263,8 +275,8 @@ def apply_filter_to_recipient(broadcast_id, org_id, filter_input, recipient_enti
             else:
                 try:
                     if datetime.strptime(
-                            metadata.get(filter_input["property"]),
-                            settings.DATETIME_FORMAT,
+                        metadata.get(filter_input["property"]),
+                        settings.DATETIME_FORMAT,
                     ) < datetime.strptime(filter_input["value"]):
                         return True
                 except ValueError:
@@ -277,8 +289,8 @@ def apply_filter_to_recipient(broadcast_id, org_id, filter_input, recipient_enti
             else:
                 try:
                     if datetime.strptime(
-                            metadata.get(filter_input["property"]),
-                            settings.DATETIME_FORMAT,
+                        metadata.get(filter_input["property"]),
+                        settings.DATETIME_FORMAT,
                     ) > datetime.strptime(filter_input["value"]):
                         return True
                 except ValueError:
@@ -289,13 +301,13 @@ def apply_filter_to_recipient(broadcast_id, org_id, filter_input, recipient_enti
             if not metadata or not metadata.get(filter_input["property"]):
                 return True
             elif isinstance(
-                    metadata.get(filter_input["property"]), str
+                metadata.get(filter_input["property"]), str
             ) and filter_input["value"] not in metadata.get(
                 filter_input["property"], ""
             ):
                 return True
             elif isinstance(
-                    metadata.get(filter_input["property"]), list
+                metadata.get(filter_input["property"]), list
             ) and filter_input["value"] not in metadata.get(
                 filter_input["property"], []
             ):
@@ -305,11 +317,11 @@ def apply_filter_to_recipient(broadcast_id, org_id, filter_input, recipient_enti
             if not metadata or not metadata.get(filter_input["property"]):
                 return True
             elif isinstance(
-                    metadata.get(filter_input["property"]), str
+                metadata.get(filter_input["property"]), str
             ) and filter_input["value"] in metadata.get(filter_input["property"], ""):
                 return True
             elif isinstance(
-                    metadata.get(filter_input["property"]), list
+                metadata.get(filter_input["property"]), list
             ) and filter_input["value"] in metadata.get(filter_input["property"], []):
                 return True
         case _:
@@ -327,9 +339,9 @@ def handle_recipient(broadcast_id, org_id, recipient_id, data):
     recipient = ExternalUser.objects.get(pk=recipient_id)
 
     if "category" in data:
-        preference = ExternalUserPreference.objects.prefetch_related(
-            "channels"
-        ).filter(user_id=recipient.id, slug=data["category"])
+        preference = ExternalUserPreference.objects.prefetch_related("channels").filter(
+            user_id=recipient.id, slug=data["category"]
+        )
 
         if preference:
             route_notification_with_preference(
@@ -355,15 +367,11 @@ def handle_topic_subscriber(broadcast_id, org_id, subscriber_id, data):
     if "category" in data:
         subscriber_category = subscriber.categories.filter(slug=data["category"])
 
-        preference = ExternalUserPreference.objects.prefetch_related(
-            "channels"
-        ).filter(user_id=subscriber.user.id, slug=data["category"])
+        preference = ExternalUserPreference.objects.prefetch_related("channels").filter(
+            user_id=subscriber.user.id, slug=data["category"]
+        )
 
-        if (
-                subscriber_category
-                and preference
-                and subscriber_category.first().enabled
-        ):
+        if subscriber_category and preference and subscriber_category.first().enabled:
             route_notification_with_preference(
                 broadcast_id,
                 org_id,
@@ -396,19 +404,27 @@ def send_sms(notification_id, broadcast_id, org_id, user_id, data):
             body=data["channels"]["sms"]["body"],
         )
 
-        logging.info("Sent Twilio sms to user: %s for broadcast: %s with status: %s", user_id, broadcast_id,
-                     message.status)
+        logging.info(
+            "Sent Twilio sms to user: %s for broadcast: %s with status: %s",
+            user_id,
+            broadcast_id,
+            message.status,
+        )
 
         if message.status in {"failed", "undelivered", "canceled"}:
             status = "failed"
-            reason = f'{message.status}: {message.error_message}'
+            reason = f"{message.status}: {message.error_message}"
         else:
             status = "sent"
             reason = ""
 
-        NotificationChannel.objects.create(notification_id=notification_id,
-                                           slug=ChannelChoices.SMS, status=status, reason=reason,
-                                           metadata={'twilio_message_sid': message.sid})
+        NotificationChannel.objects.create(
+            notification_id=notification_id,
+            slug=ChannelChoices.SMS,
+            status=status,
+            reason=reason,
+            metadata={"twilio_message_sid": message.sid},
+        )
 
         return message.sid
     except TwilioRestException as error:
@@ -418,9 +434,13 @@ def send_sms(notification_id, broadcast_id, org_id, user_id, data):
             broadcast_id,
             error.msg,
         )
-        reason = f'{error.status}: {error.msg}'
-        NotificationChannel.objects.create(notification_id=notification_id,
-                                           slug=ChannelChoices.EMAIL, status="failed", reason=reason)
+        reason = f"{error.status}: {error.msg}"
+        NotificationChannel.objects.create(
+            notification_id=notification_id,
+            slug=ChannelChoices.EMAIL,
+            status="failed",
+            reason=reason,
+        )
         raise
 
 
@@ -441,7 +461,7 @@ def send_email(notification_id, broadcast_id, org_id, user_id, data):
         mail.mail_settings = mail_settings
 
         if "sendgrid_template_id" in data["channels"]["email"]:
-            mail.dynamic_template_data = data["data"]
+            mail.dynamic_template_data = data["merge_tags"]
             mail.template_id = data["channels"]["email"]["sendgrid_template_id"]
         else:
             mail.subject = data["channels"]["email"]["subject"]
@@ -454,11 +474,14 @@ def send_email(notification_id, broadcast_id, org_id, user_id, data):
             broadcast_id,
         )
 
-        NotificationChannel.objects.create(notification_id=notification_id,
-                                           slug=ChannelChoices.EMAIL, status="sent",
-                                           metadata={'sg_x_message_id': response.headers['X-Message-ID']})
+        NotificationChannel.objects.create(
+            notification_id=notification_id,
+            slug=ChannelChoices.EMAIL,
+            status="sent",
+            metadata={"sg_x_message_id": response.headers["X-Message-ID"]},
+        )
 
-        return response.headers['X-Message-ID']
+        return response.headers["X-Message-ID"]
     except HTTPError as error:
         logging.error(
             "Sendgrid failed to send email to user: %s for broadcast: %s with reason: ",
@@ -466,8 +489,12 @@ def send_email(notification_id, broadcast_id, org_id, user_id, data):
             broadcast_id,
             error.reason,
         )
-        NotificationChannel.objects.create(notification_id=notification_id,
-                                           slug=ChannelChoices.EMAIL, status="failed", reason=error.reason)
+        NotificationChannel.objects.create(
+            notification_id=notification_id,
+            slug=ChannelChoices.EMAIL,
+            status="failed",
+            reason=error.reason,
+        )
         raise
 
 
@@ -486,12 +513,13 @@ def send_web(notification_id, user_id, data):
                 "title": data["title"],
                 "content": data["content"],
                 "action_link": data.get("action_link", ""),
-                "additional_info": data.get("additional_info", {})
+                "additional_info": data.get("additional_info", {}),
             },
         },
     )
-    notification_channel = NotificationChannel.objects.create(notification_id=notification_id,
-                                                              slug=ChannelChoices.WEB, status="sent")
+    notification_channel = NotificationChannel.objects.create(
+        notification_id=notification_id, slug=ChannelChoices.WEB, status="sent"
+    )
     return notification_channel.id
 
 
@@ -500,9 +528,12 @@ def send_mobile(notification_id, org_id, user_id, data):
     devices = ExternalUserDevice.objects.filter(user_id=user_id)
 
     if not devices:
-        NotificationChannel.objects.create(notification_id=notification_id,
-                                           slug=ChannelChoices.MOBILE_PUSH, status="not_sent",
-                                           reason="No devices for user")
+        NotificationChannel.objects.create(
+            notification_id=notification_id,
+            slug=ChannelChoices.MOBILE_PUSH,
+            status="not_sent",
+            reason="No devices for user",
+        )
         return
 
     apns = APNS.objects.filter(organization_id=org_id)
@@ -511,19 +542,22 @@ def send_mobile(notification_id, org_id, user_id, data):
         match device.platform:
             case PlatformChoices.IOS:
                 if not apns:
-                    NotificationChannel.objects.create(notification_id=notification_id,
-                                                       slug=ChannelChoices.MOBILE_PUSH,
-                                                       status="not_sent", reason="APNS account not configured")
+                    NotificationChannel.objects.create(
+                        notification_id=notification_id,
+                        slug=ChannelChoices.MOBILE_PUSH,
+                        status="not_sent",
+                        reason="APNS account not configured",
+                    )
                     continue
                 payload = IOSPayload(
                     alert=IOSPayloadAlert(
-                        title=data['channels']['mobile_push']['title'],
-                        subtitle=data['channels']['mobile_push'].get('subtitle'),
-                        body=data['channels']['mobile_push']['body'],
+                        title=data["channels"]["mobile_push"]["title"],
+                        subtitle=data["channels"]["mobile_push"].get("subtitle"),
+                        body=data["channels"]["mobile_push"]["body"],
                     ),
-                    sound=data['channels']['mobile_push'].get('sound', "default"),
-                    badge=data['channels']['mobile_push'].get('badge', 1),
-                    category=data.get('category')
+                    sound=data["channels"]["mobile_push"].get("sound", "default"),
+                    badge=data["channels"]["mobile_push"].get("badge", 1),
+                    category=data.get("category"),
                 )
                 notification = IOSNotification(
                     payload=payload,
@@ -542,73 +576,81 @@ def send_mobile(notification_id, org_id, user_id, data):
                         auth_key_id=apns.first().key_id,
                         team_id=apns.first().team_id,
                     )
-                    res = client.push(notification=notification, device_token=device.token)
+                    res = client.push(
+                        notification=notification, device_token=device.token
+                    )
                     logging.info(
                         "Apple push notification sent for user: %s with response: %s",
                         user_id,
                         res,
                     )
-                    NotificationChannel.objects.create(notification_id=notification_id,
-                                                       slug=ChannelChoices.MOBILE_PUSH, status="sent",
-                                                       metadata={
-                                                            'platform': PlatformChoices.IOS.value
-                                                       })
+                    NotificationChannel.objects.create(
+                        notification_id=notification_id,
+                        slug=ChannelChoices.MOBILE_PUSH,
+                        status="sent",
+                        metadata={"platform": PlatformChoices.IOS.value},
+                    )
 
                 except APNSException as error:
                     logging.info(
                         "Failed to send Apple push notification sent for user: %s with status code: %s and apns_id: %s",
                         user_id,
                         error.status_code,
-                        error.apns_id
+                        error.apns_id,
                     )
-                    NotificationChannel.objects.create(notification_id=notification_id,
-                                                       slug=ChannelChoices.MOBILE_PUSH, status="failed",
-                                                       reason=f"APNS error with status code: {error.status_code} "
-                                                              f"and apns_id: {error.apns_id}",
-                                                       metadata={
-                                                        'platform': PlatformChoices.IOS.value,
-                                                        'apns_id': error.apns_id
-                                                       })
+                    NotificationChannel.objects.create(
+                        notification_id=notification_id,
+                        slug=ChannelChoices.MOBILE_PUSH,
+                        status="failed",
+                        reason=f"APNS error with status code: {error.status_code} "
+                        f"and apns_id: {error.apns_id}",
+                        metadata={
+                            "platform": PlatformChoices.IOS.value,
+                            "apns_id": error.apns_id,
+                        },
+                    )
             case PlatformChoices.ANDROID:
                 if not fcm:
-                    NotificationChannel.objects.create(notification_id=notification_id,
-                                                       slug=ChannelChoices.MOBILE_PUSH,
-                                                       status="not_sent", reason="FCM account not configured")
+                    NotificationChannel.objects.create(
+                        notification_id=notification_id,
+                        slug=ChannelChoices.MOBILE_PUSH,
+                        status="not_sent",
+                        reason="FCM account not configured",
+                    )
                     continue
+                notification = CustomFCMNotification(
+                    service_account_file=fcm.first().credentials,
+                    project_id=fcm.first().project_id,
+                )
                 try:
-                    notification = CustomFCMNotification(service_account_file=fcm.first().credentials,
-                                                         project_id=fcm.first().project_id)
-                    res = notification.notify(fcm_token=device.token,
-                                              notification_title=data['channels']['mobile_push']['title'],
-                                              notification_body=data['channels']['mobile_push']['body'])
+                    res = notification.notify(
+                        fcm_token=device.token,
+                        notification_title=data["channels"]["mobile_push"]["title"],
+                        notification_body=data["channels"]["mobile_push"]["body"],
+                    )
                     logging.info(
                         "Firebase cloud messaging notification sent for user: %s with response: %s",
                         user_id,
                         res,
                     )
-                    NotificationChannel.objects.create(notification_id=notification_id,
-                                                       slug=ChannelChoices.MOBILE_PUSH, status="sent", metadata={
-                            'platform': PlatformChoices.ANDROID.value
-                        })
-                except (AuthenticationError, FCMServerError, InvalidDataError, InternalPackageError) as e:
-                    reasons = {
-                        AuthenticationError: "FCM API key not found or there was an error authenticating the sender",
-                        FCMServerError: "Internal server error or timeout error on Firebase cloud messaging server",
-                        InvalidDataError: "FCM Invalid input",
-                        InternalPackageError: "Mostly from changes in the response of FCM, contact the project owner "
-                                              "to resolve the issue"
-                    }
-                    reason = reasons.get(type(e), "Unknown error")
-                    logging.info("Firebase cloud messaging notification failed to send for user: %s with reason: %s",
-                                 user_id, reason)
+                    NotificationChannel.objects.create(
+                        notification_id=notification_id,
+                        slug=ChannelChoices.MOBILE_PUSH,
+                        status="sent",
+                        metadata={"platform": PlatformChoices.ANDROID.value},
+                    )
+                except FCMError as e:
+                    logging.info(
+                        "Firebase cloud messaging notification failed to send for user: %s with error: %s",
+                        user_id,
+                        e,
+                    )
                     NotificationChannel.objects.create(
                         notification_id=notification_id,
                         slug=ChannelChoices.MOBILE_PUSH,
                         status="failed",
-                        reason=reason,
-                        metadata={
-                            'platform': PlatformChoices.ANDROID.value
-                        }
+                        reason=e,
+                        metadata={"platform": PlatformChoices.ANDROID.value},
                     )
             case _:
                 continue
@@ -694,16 +736,15 @@ def update_or_create_external_user(broadcast_id, org_id, recipient, data):
 
             broadcast = Broadcast.objects.get(pk=broadcast_id)
 
-            if 'errors' not in broadcast.metadata:
-                broadcast.metadata['errors'] = {}
+            if "errors" not in broadcast.metadata:
+                broadcast.metadata["errors"] = {}
 
-            if 'recipients' not in broadcast.metadata['errors']:
-                broadcast.metadata['errors']['recipients'] = []
+            if "recipients" not in broadcast.metadata["errors"]:
+                broadcast.metadata["errors"]["recipients"] = []
 
-            broadcast.metadata['errors']['recipients'].append({
-                'email': recipient["email"],
-                'reason': 'User email does not exist'
-            })
+            broadcast.metadata["errors"]["recipients"].append(
+                {"email": recipient["email"], "reason": "User email does not exist"}
+            )
 
             broadcast.save()
 
@@ -718,7 +759,9 @@ def route_notification_with_preference(broadcast_id, org_id, recipient, channels
         broadcast_id,
     )
 
-    notification = persist_notification(broadcast_id, org_id, recipient.id, data, sent_at=datetime.now(timezone.utc))
+    notification = persist_notification(
+        broadcast_id, org_id, recipient.id, data, sent_at=datetime.now(timezone.utc)
+    )
 
     web_preference_entity = channels.get(slug=ChannelChoices.WEB.value)
     if web_preference_entity.enabled:
@@ -731,14 +774,20 @@ def route_notification_with_preference(broadcast_id, org_id, recipient, channels
             org_id,
             broadcast_id,
         )
-        NotificationChannel.objects.create(notification_id=notification.id,
-                                           slug=ChannelChoices.WEB, status="not_sent", reason="User disabled")
+        NotificationChannel.objects.create(
+            notification_id=notification.id,
+            slug=ChannelChoices.WEB,
+            status="not_sent",
+            reason="User disabled",
+        )
 
     if "channels" in data:
         if "sms" in data["channels"]:
             sms_preference_entity = channels.get(slug=ChannelChoices.SMS.value)
             if sms_preference_entity.enabled and recipient.phone:
-                send_sms.delay(notification.id, broadcast_id, org_id, recipient.id, data)
+                send_sms.delay(
+                    notification.id, broadcast_id, org_id, recipient.id, data
+                )
             elif sms_preference_entity.enabled and not recipient.phone:
                 logging.warning(
                     "Trying to route SMS notification without phone on record for user: %s in org: %s for broadcast: %s",
@@ -746,9 +795,12 @@ def route_notification_with_preference(broadcast_id, org_id, recipient, channels
                     org_id,
                     broadcast_id,
                 )
-                NotificationChannel.objects.create(notification_id=notification.id,
-                                                   slug=ChannelChoices.SMS, status="failed",
-                                                   reason="No phone provided for user")
+                NotificationChannel.objects.create(
+                    notification_id=notification.id,
+                    slug=ChannelChoices.SMS,
+                    status="failed",
+                    reason="No phone provided for user",
+                )
             else:
                 logging.info(
                     "SMS disabled for category: %s for user: %s in org: %s for broadcast: %s",
@@ -757,13 +809,19 @@ def route_notification_with_preference(broadcast_id, org_id, recipient, channels
                     org_id,
                     broadcast_id,
                 )
-                NotificationChannel.objects.create(notification_id=notification.id,
-                                                   slug=ChannelChoices.SMS, status="not_sent", reason="User disabled")
+                NotificationChannel.objects.create(
+                    notification_id=notification.id,
+                    slug=ChannelChoices.SMS,
+                    status="not_sent",
+                    reason="User disabled",
+                )
 
         if "email" in data["channels"]:
             email_preference_entity = channels.get(slug=ChannelChoices.EMAIL.value)
             if email_preference_entity.enabled:
-                send_email.delay(notification.id, broadcast_id, org_id, recipient.id, data)
+                send_email.delay(
+                    notification.id, broadcast_id, org_id, recipient.id, data
+                )
             else:
                 logging.info(
                     "Email disabled for category: %s for user: %s in org: %s for broadcast: %s",
@@ -772,11 +830,17 @@ def route_notification_with_preference(broadcast_id, org_id, recipient, channels
                     org_id,
                     broadcast_id,
                 )
-                NotificationChannel.objects.create(notification_id=notification.id,
-                                                   slug=ChannelChoices.EMAIL, status="not_sent", reason="User disabled")
+                NotificationChannel.objects.create(
+                    notification_id=notification.id,
+                    slug=ChannelChoices.EMAIL,
+                    status="not_sent",
+                    reason="User disabled",
+                )
 
-        if "mobile_push" in data['channels']:
-            mobile_preference_entity = channels.get(slug=ChannelChoices.MOBILE_PUSH.value)
+        if "mobile_push" in data["channels"]:
+            mobile_preference_entity = channels.get(
+                slug=ChannelChoices.MOBILE_PUSH.value
+            )
             if mobile_preference_entity.enabled:
                 send_mobile.delay(notification.id, org_id, recipient.id, data)
             else:
@@ -787,9 +851,12 @@ def route_notification_with_preference(broadcast_id, org_id, recipient, channels
                     org_id,
                     broadcast_id,
                 )
-                NotificationChannel.objects.create(notification_id=notification.id,
-                                                   slug=ChannelChoices.MOBILE_PUSH, status="not_sent",
-                                                   reason="User disabled")
+                NotificationChannel.objects.create(
+                    notification_id=notification.id,
+                    slug=ChannelChoices.MOBILE_PUSH,
+                    status="not_sent",
+                    reason="User disabled",
+                )
 
 
 def route_basic_notification(broadcast_id, org_id, recipient, data):
@@ -800,7 +867,9 @@ def route_basic_notification(broadcast_id, org_id, recipient, data):
         broadcast_id,
     )
 
-    notification = persist_notification(broadcast_id, org_id, recipient.id, data, sent_at=datetime.now(timezone.utc))
+    notification = persist_notification(
+        broadcast_id, org_id, recipient.id, data, sent_at=datetime.now(timezone.utc)
+    )
     send_web.delay(notification.id, recipient.id, data)
 
     if "channels" in data:
@@ -813,9 +882,12 @@ def route_basic_notification(broadcast_id, org_id, recipient, data):
                 org_id,
                 broadcast_id,
             )
-            NotificationChannel.objects.create(notification_id=notification.id,
-                                               slug=ChannelChoices.SMS, status="failed",
-                                               reason="No phone provided for user")
+            NotificationChannel.objects.create(
+                notification_id=notification.id,
+                slug=ChannelChoices.SMS,
+                status="failed",
+                reason="No phone provided for user",
+            )
         if "email" in data["channels"]:
             send_email.delay(notification.id, broadcast_id, org_id, recipient.id, data)
         if "mobile_push" in data["channels"]:

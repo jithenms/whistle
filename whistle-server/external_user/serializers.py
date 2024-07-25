@@ -46,7 +46,10 @@ class ExternalUserSerializer(serializers.ModelSerializer):
         )
         return response
 
+
 class ExternalUserDeviceSerializer(serializers.ModelSerializer):
+    platform = serializers.CharField(max_length=255)
+
     class Meta:
         model = ExternalUserDevice
         fields = [
@@ -64,3 +67,11 @@ class ExternalUserDeviceSerializer(serializers.ModelSerializer):
                 f"'{value}' is not a valid choice for 'platform'.", "invalid_platform"
             )
         return value_upper
+
+    def create(self, validated_data):
+        org = self.context["request"].user
+        external_id = self.context.get("external_id")
+        external_user = ExternalUser.objects.get(organization=org, external_id=external_id)
+        validated_data['user'] = external_user
+        response = super().create(validated_data)
+        return response

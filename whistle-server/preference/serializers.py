@@ -42,7 +42,7 @@ class ExternalUserPreferenceSerializer(serializers.ModelSerializer):
         try:
             with transaction.atomic():
                 channels_data = validated_data.pop("channels", [])
-                external_user = ExternalUser.objects.get(external_id=external_id)
+                external_user = ExternalUser.objects.get(organization=org, external_id=external_id)
 
                 user_preference = ExternalUserPreference.objects.create(
                     organization=org, user=external_user, slug=validated_data["slug"]

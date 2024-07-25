@@ -5,7 +5,8 @@ from connector.models import Sendgrid, Twilio, FCM, APNS
 from external_user.serializers import ExternalUserSerializer
 from notification.models import (
     Notification,
-    Broadcast, NotificationChannel,
+    Broadcast,
+    NotificationChannel,
 )
 
 
@@ -15,30 +16,34 @@ class ChannelEmailSerializer(serializers.Serializer):
     sendgrid_template_id = serializers.CharField(max_length=255, required=False)
 
     def validate(self, data):
-        subject = data.get('subject')
-        content = data.get('content')
-        sendgrid_template_id = data.get('sendgrid_template_id')
+        subject = data.get("subject")
+        content = data.get("content")
+        sendgrid_template_id = data.get("sendgrid_template_id")
 
         if not sendgrid_template_id:
             if subject and not content:
                 raise serializers.ValidationError(
-                    {'content': "You must provide content for the email if using a subject."},
-                    "missing_email_content"
+                    {
+                        "content": "You must provide content for the email if using a subject."
+                    },
+                    "missing_email_content",
                 )
             if content and not subject:
                 raise serializers.ValidationError(
-                    {'subject': "You must provide a subject for the email if using content."},
-                    "missing_email_subject"
+                    {
+                        "subject": "You must provide a subject for the email if using content."
+                    },
+                    "missing_email_subject",
                 )
             if not subject and not content:
                 raise serializers.ValidationError(
                     {
-                        'sendgrid_template_id': "The 'sendgrid_template_id' field is required "
-                                                "if both 'subject' and 'content' are not provided.",
-                        'subject': "The 'subject' field is required if 'sendgrid_template_id' is not provided.",
-                        'content': "The 'content' field is required if 'sendgrid_template_id' is not provided."
+                        "sendgrid_template_id": "The 'sendgrid_template_id' field is required "
+                        "if both 'subject' and 'content' are not provided.",
+                        "subject": "The 'subject' field is required if 'sendgrid_template_id' is not provided.",
+                        "content": "The 'content' field is required if 'sendgrid_template_id' is not provided.",
                     },
-                    "invalid_email_params"
+                    "invalid_email_params",
                 )
 
         return data
@@ -59,12 +64,7 @@ class ChannelMobilePushSerializer(serializers.Serializer):
 class NotificationChannelSerializer(serializers.ModelSerializer):
     class Meta:
         model = NotificationChannel
-        fields = [
-            'slug',
-            'status',
-            'reason',
-            'metadata'
-        ]
+        fields = ["slug", "status", "reason", "metadata"]
 
 
 class NotificationSerializer(serializers.ModelSerializer):
@@ -125,7 +125,7 @@ class BroadcastSerializer(serializers.ModelSerializer):
     filters = FilterSerializer(many=True, required=False, write_only=True)
     channels = BroadcastChannelSerializer(required=False)
     additional_info = serializers.JSONField(required=False, default=dict)
-    data = serializers.JSONField(required=False, write_only=True, default=dict)
+    merge_tags = serializers.JSONField(required=False, write_only=True, default=dict)
     metadata = serializers.JSONField(read_only=True, default=dict)
 
     class Meta:
@@ -162,15 +162,17 @@ class BroadcastSerializer(serializers.ModelSerializer):
                 "audience_and_recipients_unsupported",
             )
 
-        if "email" in data.get('channels', {}):
-            sendgrid = Sendgrid.objects.filter(organization=self.context["request"].user)
+        if "email" in data.get("channels", {}):
+            sendgrid = Sendgrid.objects.filter(
+                organization=self.context["request"].user
+            )
             if not sendgrid:
                 raise serializers.ValidationError(
                     "Sendgrid account not configured. Please configure a Sendgrid account to send emails.",
                     "sendgrid_account_not_configured",
                 )
 
-        if "sms" in data.get('channels', {}):
+        if "sms" in data.get("channels", {}):
             twilio = Twilio.objects.filter(organization=self.context["request"].user)
             if not twilio:
                 raise serializers.ValidationError(
@@ -178,7 +180,7 @@ class BroadcastSerializer(serializers.ModelSerializer):
                     "twilio_account_not_configured",
                 )
 
-        if "mobile_push" in data.get('channels', {}):
+        if "mobile_push" in data.get("channels", {}):
             fcm = FCM.objects.filter(organization=self.context["request"].user)
             apns = APNS.objects.filter(organization=self.context["request"].user)
 
@@ -188,11 +190,13 @@ class BroadcastSerializer(serializers.ModelSerializer):
                     "fcm_and_apns_not_configured",
                 )
 
-        data['metadata'] = {}
+        data["metadata"] = {}
 
-        if "data" in data and "email" not in data.get("channels", {}):
+        if data["data"] and "email" not in data.get("channels", {}):
             raise serializers.ValidationError(
-                {'data': "The 'data' field requires 'channels.email.sendgrid_template_id' to be specified."},
+                {
+                    "data": "The 'data' field requires 'channels.email.sendgrid_template_id' to be specified."
+                },
                 "sendgrid_template_id_unspecified",
             )
 

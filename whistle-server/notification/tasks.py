@@ -420,7 +420,9 @@ def send_sms(broadcast_id, org_id, user_id, data):
             broadcast_id,
             org_id,
             user_id,
-            data,
+            data["channels"]["sms"].get("title", data["title"]),
+            data["channels"]["sms"].get("content", data["content"]),
+            data["channels"]["sms"].get("action_link", data["content"]),
             channel=ChannelChoices.SMS,
             status=status,
             error_reason=reason,
@@ -441,7 +443,9 @@ def send_sms(broadcast_id, org_id, user_id, data):
             broadcast_id,
             org_id,
             user_id,
-            data,
+            data["channels"]["sms"].get("title", data["title"]),
+            data["channels"]["sms"].get("content", data["content"]),
+            data["channels"]["sms"].get("action_link", data["content"]),
             channel=ChannelChoices.SMS,
             status="failed",
             error_reason=reason,
@@ -470,8 +474,10 @@ def send_email(broadcast_id, org_id, user_id, data):
             mail.dynamic_template_data = data["merge_tags"]
             mail.template_id = data["channels"]["email"]["sendgrid_template_id"]
         else:
-            mail.subject = data["channels"]["email"]["subject"]
-            mail.content = Content("text/plain", data["channels"]["email"]["content"])
+            mail.subject = data["channels"]["email"].get("title", data["title"])
+            mail.content = Content(
+                "text/plain", data["channels"]["email"].get("content", data["content"])
+            )
         response = sg.send(mail)
         logging.info(
             "Sendgrid email with status code: %s sent to user: %s with broadcast: %s",
@@ -484,7 +490,9 @@ def send_email(broadcast_id, org_id, user_id, data):
             broadcast_id,
             org_id,
             user_id,
-            data,
+            data["channels"]["email"].get("title", data["title"]),
+            data["channels"]["email"].get("content", data["content"]),
+            data["channels"]["email"].get("action_link", data.get("action_link")),
             channel=ChannelChoices.EMAIL,
             status="sent",
             metadata={"sg_x_message_id": response.headers["X-Message-ID"]},
@@ -503,7 +511,9 @@ def send_email(broadcast_id, org_id, user_id, data):
             broadcast_id,
             org_id,
             user_id,
-            data,
+            data["channels"]["email"].get("title", data["title"]),
+            data["channels"]["email"].get("content", data["content"]),
+            data["channels"]["email"].get("action_link", data["content"]),
             channel=ChannelChoices.EMAIL,
             status="failed",
             reason=error.reason,
@@ -514,11 +524,17 @@ def send_email(broadcast_id, org_id, user_id, data):
 
 @app.task
 def send_in_app(broadcast_id, org_id, user_id, data):
+    title = data["channels"]["in_app"].get("title", data["title"])
+    content = data["channels"]["in_app"].get("content", data["content"])
+    action_link = data["channels"]["in_app"].get("action_link", data["content"])
+
     notification = persist_notification(
         broadcast_id,
         org_id,
         user_id,
-        data,
+        title,
+        content,
+        action_link,
         channel=ChannelChoices.IN_APP,
         status="sent",
         sent_at=datetime.now(timezone.utc),
@@ -534,9 +550,9 @@ def send_in_app(broadcast_id, org_id, user_id, data):
                 "id": str(notification.id),
                 "category": data.get("category", ""),
                 "topic": data.get("topic", ""),
-                "title": data["title"],
-                "content": data["content"],
-                "action_link": data.get("action_link", ""),
+                "title": title,
+                "content": content,
+                "action_link": action_link,
                 "additional_info": data.get("additional_info", {}),
             },
         },
@@ -605,7 +621,11 @@ def send_push(broadcast_id, org_id, user_id, data):
                         broadcast_id,
                         org_id,
                         user_id,
-                        data,
+                        data["channels"]["push"].get("title", data["title"]),
+                        data["channels"]["push"].get("content", data["content"]),
+                        data["channels"]["push"].get(
+                            "action_link", data["action_link"]
+                        ),
                         channel=ChannelChoices.PUSH,
                         status="sent",
                         metadata={"platform": PlatformChoices.IOS.value},
@@ -623,7 +643,11 @@ def send_push(broadcast_id, org_id, user_id, data):
                         broadcast_id,
                         org_id,
                         user_id,
-                        data,
+                        data["channels"]["push"].get("title", data["title"]),
+                        data["channels"]["push"].get("content", data["content"]),
+                        data["channels"]["push"].get(
+                            "action_link", data["action_link"]
+                        ),
                         channel=ChannelChoices.PUSH,
                         status="failed",
                         reason=f"APNS error with status code: {error.status_code} ",
@@ -665,7 +689,11 @@ def send_push(broadcast_id, org_id, user_id, data):
                         broadcast_id,
                         org_id,
                         user_id,
-                        data,
+                        data["channels"]["push"].get("title", data["title"]),
+                        data["channels"]["push"].get("content", data["content"]),
+                        data["channels"]["push"].get(
+                            "action_link", data["action_link"]
+                        ),
                         channel=ChannelChoices.PUSH,
                         status="sent",
                         metadata={"platform": PlatformChoices.ANDROID.value},
@@ -682,7 +710,11 @@ def send_push(broadcast_id, org_id, user_id, data):
                         broadcast_id,
                         org_id,
                         user_id,
-                        data,
+                        data["channels"]["push"].get("title", data["title"]),
+                        data["channels"]["push"].get("content", data["content"]),
+                        data["channels"]["push"].get(
+                            "action_link", data["action_link"]
+                        ),
                         channel=ChannelChoices.PUSH,
                         status="failed",
                         error_reason=e,
@@ -700,14 +732,16 @@ def update_broadcast_status(_, broadcast_id, status):
     return broadcast_id
 
 
-def persist_notification(broadcast_id, org_id, user_id, data, **kwargs):
+def persist_notification(
+    broadcast_id, org_id, user_id, title, content, action_link, **kwargs
+):
     notification = Notification.objects.create(
         organization_id=org_id,
         recipient_id=user_id,
         broadcast_id=broadcast_id,
-        title=data.get("title", ""),
-        content=data.get("content", ""),
-        action_link=data.get("action_link", ""),
+        title=title,
+        content=content,
+        action_link=action_link,
         **kwargs,
     )
 
@@ -799,7 +833,7 @@ def route_notification_with_preference(broadcast_id, org_id, recipient, channels
             send_in_app.delay(broadcast_id, org_id, recipient.id, data)
         else:
             logging.info(
-                "Web push disabled for category %s for user: %s in org: %s for broadcast: %s",
+                "In app disabled for category %s for user: %s in org: %s for broadcast: %s",
                 data.get("category", None),
                 recipient.id,
                 org_id,
@@ -809,7 +843,9 @@ def route_notification_with_preference(broadcast_id, org_id, recipient, channels
                 broadcast_id,
                 org_id,
                 recipient.id,
-                data,
+                data["channels"]["in_app"].get("title", data["title"]),
+                data["channels"]["in_app"].get("content", data["content"]),
+                data["channels"]["in_app"].get("action_link", data.get("action_link")),
                 channel=ChannelChoices.IN_APP,
                 status="not_sent",
                 error_reason="User disabled",
@@ -830,7 +866,9 @@ def route_notification_with_preference(broadcast_id, org_id, recipient, channels
                 broadcast_id,
                 org_id,
                 recipient.id,
-                data,
+                data["channels"]["sms"].get("title", data["title"]),
+                data["channels"]["sms"].get("content", data["content"]),
+                data["channels"]["sms"].get("action_link", data.get("action_link")),
                 channel=ChannelChoices.SMS,
                 status="failed",
                 error_reason="No phone provided for user",
@@ -847,7 +885,9 @@ def route_notification_with_preference(broadcast_id, org_id, recipient, channels
                 broadcast_id,
                 org_id,
                 recipient.id,
-                data,
+                data["channels"]["sms"].get("title", data["title"]),
+                data["channels"]["sms"].get("content", data["content"]),
+                data["channels"]["sms"].get("action_link", data.get("action_link")),
                 channel=ChannelChoices.SMS,
                 status="not_sent",
                 error_reason="User disabled",
@@ -869,7 +909,9 @@ def route_notification_with_preference(broadcast_id, org_id, recipient, channels
                 broadcast_id,
                 org_id,
                 recipient.id,
-                data,
+                data["channels"]["email"].get("title", data["title"]),
+                data["channels"]["email"].get("content", data["content"]),
+                data["channels"]["email"].get("action_link", data.get("action_link")),
                 channel=ChannelChoices.EMAIL,
                 status="not_sent",
                 error_reason="User disabled",
@@ -891,7 +933,9 @@ def route_notification_with_preference(broadcast_id, org_id, recipient, channels
                 broadcast_id,
                 org_id,
                 recipient.id,
-                data,
+                data["channels"]["push"].get("title", data["title"]),
+                data["channels"]["push"].get("content", data["content"]),
+                data["channels"]["push"].get("action_link", data.get("action_link")),
                 channel=ChannelChoices.PUSH,
                 status="not_sent",
                 error_reason="User disabled",
@@ -924,7 +968,9 @@ def route_basic_notification(broadcast_id, org_id, recipient, data):
             broadcast_id,
             org_id,
             recipient.id,
-            data,
+            data["channels"]["sms"].get("title", data["title"]),
+            data["channels"]["sms"].get("content", data["content"]),
+            data["channels"]["sms"].get("action_link", data.get("action_link")),
             channel=ChannelChoices.SMS,
             status="failed",
             error_reason="No phone provided for user",

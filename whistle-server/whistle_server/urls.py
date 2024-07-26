@@ -23,11 +23,16 @@ from audience.views import AudienceViewSet
 from connector.views import SendgridViewSet, TwilioViewSet, APNSViewSet, FCMViewSet
 from external_user.views import ExternalUserViewSet, ExternalUserDeviceViewSet
 from notification.views import NotificationViewSet, BroadcastViewSet
-from organization.views import OrganizationViewSet
+from organization.views import OrganizationViewSet, OrganizationCredentialsViewSet
 from preference.views import ExternalUserPreferenceViewSet
 from subscription.views import ExternalUserSubscriptionViewSet
 
 v1_router = DefaultRouter()
+v1_router.register(
+    r"organizations/credentials",
+    OrganizationCredentialsViewSet,
+    basename="organizations.credentials",
+)
 v1_router.register(r"organizations", OrganizationViewSet, basename="organizations")
 v1_router.register(r"users", ExternalUserViewSet, basename="external_users")
 v1_router.register(

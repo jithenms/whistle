@@ -4,16 +4,23 @@ import uuid
 from django.db import models
 
 from organization.models import Organization
+from whistle_server import utils
 
 
 class ExternalUser(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE)
     external_id = models.CharField(max_length=255)
-    first_name = models.CharField(max_length=255, blank=True)
-    last_name = models.CharField(max_length=255, blank=True)
-    email = models.CharField(max_length=255)
-    phone = models.CharField(max_length=255, blank=True)
+    first_name = utils.EncryptedField(
+        key_id="alias/PersonalData", max_length=255, blank=True
+    )
+    last_name = utils.EncryptedField(
+        key_id="alias/PersonalData", max_length=255, blank=True
+    )
+    email = utils.EncryptedField(key_id="alias/PersonalData", max_length=255)
+    phone = utils.EncryptedField(
+        key_id="alias/PersonalData", max_length=255, blank=True
+    )
     metadata = models.JSONField(null=True, blank=True)
 
     class Meta:

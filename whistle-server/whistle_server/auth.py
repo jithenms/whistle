@@ -55,18 +55,18 @@ class ServerAuth(BaseAuthentication):
         else:
             api_key = request.headers.get("X-API-Key")
             api_secret = request.headers.get("X-API-Secret")
-            if api_key is None and api_secret is None:
+            if not api_key and not api_secret:
                 raise ValidationError(
                     "No credentials provided. Please provide either an access token or an API key and API secret in "
                     "the request header.",
                     "missing_credentials",
                 )
-            elif api_key is None:
+            elif not api_key:
                 raise ValidationError(
                     "API key is missing. Please provide your API key in the request header.",
                     "missing_api_key",
                 )
-            elif api_secret is None:
+            elif not api_secret:
                 raise ValidationError(
                     "API secret is missing. Please provide your API secret in the request header.",
                     "missing_api_secret",
@@ -95,7 +95,7 @@ class ServerAuth(BaseAuthentication):
                         )
                     else:
                         return credentials.organization, None
-                except Organization.DoesNotExist:
+                except OrganizationCredentials.DoesNotExist:
                     logging.debug("API key invalid.")
                     raise AuthenticationFailed(
                         "API key invalid. You can find your API key in Whistle settings.",
@@ -146,7 +146,7 @@ class ClientAuth(BaseAuthentication):
                     "organization"
                 ).get(api_key_hash=api_key_hash)
                 return credentials.organization, None
-            except Organization.DoesNotExist:
+            except OrganizationCredentials.DoesNotExist:
                 logging.debug("Invalid API Key provided")
                 raise AuthenticationFailed(
                     "API key invalid. You can find your API key in Whistle settings.",
@@ -160,10 +160,9 @@ class IsValidExternalId(BasePermission):
         external_id = request.headers.get("X-External-Id")
         external_id_hmac = request.headers.get("X-External-Id-Hmac")
         credentials = OrganizationCredentials.objects.get(organization=request.user)
-        api_secret = utils.decrypt(credentials.api_secret_cipher)
         if external_id or external_id_hmac:
             external_id_check = hmac.new(
-                api_secret.encode(), external_id.encode(), hashlib.sha256
+                credentials.api_secret.encode(), external_id.encode(), hashlib.sha256
             ).hexdigest()
             if external_id_check == external_id_hmac:
                 return True

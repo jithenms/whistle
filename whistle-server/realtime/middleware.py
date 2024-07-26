@@ -10,7 +10,6 @@ from jwt import PyJWKClient
 
 from external_user.models import ExternalUser
 from organization.models import OrganizationCredentials
-from whistle_server import utils
 
 jwks_client = PyJWKClient(settings.JWKS_ENDPOINT_URL)
 
@@ -36,9 +35,10 @@ class ClientAuthMiddleware:
             if credentials:
                 external_id = params[b"external_id"][0].decode()
                 external_id_hmac = params[b"external_id_hmac"][0].decode()
-                api_secret = utils.decrypt(credentials.api_secret_cipher)
                 external_id_check = hmac.new(
-                    api_secret.encode(), external_id.encode(), hashlib.sha256
+                    credentials.api_secret.encode(),
+                    external_id.encode(),
+                    hashlib.sha256,
                 ).hexdigest()
                 if external_id_check == external_id_hmac:
                     external_user = await get_external_user(

@@ -154,7 +154,7 @@ DATABASES = {
         "PASSWORD": os.environ.get("SQL_PASSWORD", "postgres"),
         "HOST": os.environ.get("SQL_HOST", "127.0.0.1"),
         "PORT": os.environ.get("SQL_PORT", "5432"),
-        "OPTIONS": {"sslmode": os.environ.get("SSL_MODE", "disable")},
+        "OPTIONS": {"sslmode": os.environ.get("SQL_SSL_MODE", "disable")},
     }
 }
 
@@ -200,7 +200,8 @@ CELERY_BEAT_MAX_LOOP_INTERVAL = 5
 REDBEAT_LOCK_TIMEOUT = CELERY_BEAT_MAX_LOOP_INTERVAL + 60
 
 REDBEAT_REDIS_URL = os.environ.get("REDBEAT_REDIS_URL", "redis://127.0.0.1:6379/0")
-REDBEAT_REDIS_USE_SSL = True if os.environ.get("SSL_MODE") == "enable" else False
+
+REDIS_CACHE_URL = os.environ.get("REDIS_CACHE_URL", "redis://127.0.0.1:6379/0")
 
 JWKS_ENDPOINT_URL = os.getenv("JWKS_ENDPOINT_URL")
 USE_SENDGRID_SANDBOX = bool(os.getenv("USE_SENDGRID_SANDBOX", 0))

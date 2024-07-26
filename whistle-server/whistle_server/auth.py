@@ -1,20 +1,22 @@
+import base64
 import hashlib
 import hmac
 import logging
+import secrets
 
 import jwt
 from django.conf import settings
+from django.db import transaction
 from jwt import PyJWKClient
-from keycove import decrypt, generate_token, encrypt
 from rest_framework.authentication import BaseAuthentication
 from rest_framework.exceptions import ValidationError, AuthenticationFailed
 from rest_framework.permissions import BasePermission
 
-from organization.models import Organization
+from organization.models import Organization, OrganizationCredentials
 from organization.models import OrganizationMember
 from user.models import User
 
-jwks_client = PyJWKClient(settings.WHISTLE_JWKS_ENDPOINT)
+jwks_client = PyJWKClient(settings.JWKS_ENDPOINT_URL)
 
 
 class ServerAuth(BaseAuthentication):
@@ -71,22 +73,28 @@ class ServerAuth(BaseAuthentication):
                 )
             else:
                 try:
-                    api_key_hash = hashlib.sha256(api_key.encode()).hexdigest()
-                    org = Organization.objects.get(api_key_hash=api_key_hash)
-                    api_secret_hash = hashlib.sha256(
-                        (api_secret + org.api_secret_salt).encode()
-                    ).hexdigest()
-                    if api_secret_hash != org.api_secret_hash:
+                    api_key_hash = base64.b64encode(
+                        hashlib.sha256(api_key.encode()).digest()
+                    ).decode()
+                    credentials = OrganizationCredentials.objects.select_related(
+                        "organization"
+                    ).get(api_key_hash=api_key_hash)
+                    api_secret_hash = base64.b64encode(
+                        hashlib.sha256(
+                            (api_secret + credentials.api_secret_salt).encode()
+                        ).digest()
+                    ).decode()
+                    if api_secret_hash != credentials.api_secret_hash:
                         logging.debug(
                             "API secret invalid for org: %s",
-                            org.id,
+                            credentials.organization.id,
                         )
                         raise AuthenticationFailed(
                             "API secret invalid. You can find your API secret in Whistle settings.",
                             "invalid_api_secret",
                         )
                     else:
-                        return org, None
+                        return credentials.organization, None
                 except Organization.DoesNotExist:
                     logging.debug("API key invalid.")
                     raise AuthenticationFailed(
@@ -130,10 +138,14 @@ class ClientAuth(BaseAuthentication):
                 )
         else:
             api_key = request.headers.get("X-API-Key")
-            api_key_hash = hashlib.sha256(api_key.encode()).hexdigest()
+            api_key_hash = base64.b64encode(
+                hashlib.sha256(api_key.encode()).digest()
+            ).decode()
             try:
-                org = Organization.objects.get(api_key_hash=api_key_hash)
-                return org, None
+                credentials = OrganizationCredentials.objects.select_related(
+                    "organization"
+                ).get(api_key_hash=api_key_hash)
+                return credentials.organization, None
             except Organization.DoesNotExist:
                 logging.debug("Invalid API Key provided")
                 raise AuthenticationFailed(
@@ -147,10 +159,9 @@ class IsValidExternalId(BasePermission):
     def has_permission(self, request, view):
         external_id = request.headers.get("X-External-Id")
         external_id_hmac = request.headers.get("X-External-Id-Hmac")
-        api_secret = decrypt(
-            request.user.api_secret_encrypt, settings.WHISTLE_SECRET_KEY
-        )
-        if external_id is not None or external_id_hmac is not None:
+        credentials = OrganizationCredentials.objects.get(organization=request.user)
+        api_secret = utils.decrypt(credentials.api_secret_cipher)
+        if external_id or external_id_hmac:
             external_id_check = hmac.new(
                 api_secret.encode(), external_id.encode(), hashlib.sha256
             ).hexdigest()
@@ -166,7 +177,7 @@ class IsValidExternalId(BasePermission):
                     "Invalid External Id HMAC provided for org: %s",
                     request.user.id,
                 )
-        elif external_id is not None and external_id_hmac is None:
+        elif external_id and not external_id_hmac:
             self.message = (
                 "No External ID Hmac provided. Please ensure you are generating an Hmac "
                 "using your secret key and try again."
@@ -182,13 +193,7 @@ class IsValidExternalId(BasePermission):
 
 
 def update_or_create_user(data):
-    user, user_created = User.objects.update_or_create(
-        clerk_user_id=data["user_id"],
-        defaults={
-            "full_name": data["full_name"],
-            "email": data["primary_email"],
-        },
-    )
+    user, user_created = User.objects.update_or_create(clerk_user_id=data["user_id"])
 
     if user_created:
         logging.info("New user with clerk id: %s synced.", user.clerk_user_id)
@@ -197,28 +202,31 @@ def update_or_create_user(data):
 
 
 def update_or_create_organization(data):
-    org, org_created = Organization.objects.update_or_create(
-        clerk_org_id=data["org_id"],
-        defaults={"slug": data["org_slug"], "name": data["org_name"]},
-    )
-    if org_created:
-        (
-            api_key_encrypt,
-            api_key_hash,
-            api_secret_encrypt,
-            api_secret_hash,
-            api_secret_salt,
-        ) = generate_api_credentials()
+    with transaction.atomic():
+        org, org_created = Organization.objects.update_or_create(
+            clerk_org_id=data["org_id"],
+            defaults={"slug": data["org_slug"], "name": data["org_name"]},
+        )
+        if org_created:
+            (
+                api_key,
+                api_key_hash,
+                api_secret,
+                api_secret_hash,
+                api_secret_salt,
+            ) = generate_api_credentials()
 
-        org.api_key_encrypt = api_key_encrypt
-        org.api_key_hash = api_key_hash
-        org.api_secret_encrypt = api_secret_encrypt
-        org.api_secret_hash = api_secret_hash
-        org.api_secret_salt = api_secret_salt
-        org.save()
+            OrganizationCredentials.objects.create(
+                organization=org,
+                api_key=api_key,
+                api_key_hash=api_key_hash,
+                api_secret=api_secret,
+                api_secret_hash=api_secret_hash,
+                api_secret_salt=api_secret_salt,
+            )
 
-        logging.info("New organization with clerk id: %s synced.", data["org_id"])
-    return org
+            logging.info("New organization with clerk id: %s synced.", data["org_id"])
+        return org
 
 
 def update_or_create_organization_member(data, user, org):
@@ -237,19 +245,19 @@ def update_or_create_organization_member(data, user, org):
 
 
 def generate_api_credentials():
-    api_key = generate_token(16)
-    api_secret = generate_token(32)
-    api_secret_salt = generate_token(8)
-    api_key_encrypt = encrypt(api_key, settings.WHISTLE_SECRET_KEY)
-    api_secret_encrypt = encrypt(api_secret, settings.WHISTLE_SECRET_KEY)
-    api_key_hash = hashlib.sha256(api_key.encode()).hexdigest()
-    api_secret_hash = hashlib.sha256(
-        (api_secret + api_secret_salt).encode()
-    ).hexdigest()
+    api_key = secrets.token_urlsafe(32)
+    api_secret = secrets.token_urlsafe(64)
+
+    api_secret_salt = secrets.token_urlsafe(8)
+    api_key_hash = base64.b64encode(hashlib.sha256(api_key.encode()).digest()).decode()
+    api_secret_hash = base64.b64encode(
+        hashlib.sha256((api_secret + api_secret_salt).encode()).digest()
+    ).decode()
+
     return (
-        api_key_encrypt,
+        api_key,
         api_key_hash,
-        api_secret_encrypt,
+        api_secret,
         api_secret_hash,
         api_secret_salt,
     )

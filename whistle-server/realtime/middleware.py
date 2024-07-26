@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import hmac
 import logging
@@ -6,12 +7,12 @@ from urllib.parse import parse_qs
 from channels.db import database_sync_to_async
 from django.conf import settings
 from jwt import PyJWKClient
-from keycove import decrypt
 
 from external_user.models import ExternalUser
-from organization.models import Organization
+from organization.models import OrganizationCredentials
+from whistle_server import utils
 
-jwks_client = PyJWKClient(settings.WHISTLE_JWKS_ENDPOINT)
+jwks_client = PyJWKClient(settings.JWKS_ENDPOINT_URL)
 
 
 class ClientAuthMiddleware:
@@ -28,24 +29,24 @@ class ClientAuthMiddleware:
         ):
             api_key = headers[b"sec-websocket-protocol"].decode()
             scope["api_key"] = api_key
-            api_key_hash = hashlib.sha256(api_key.encode()).hexdigest()
-            org = await get_organization(api_key_hash=api_key_hash)
-            if org:
+            api_key_hash = base64.b64encode(
+                hashlib.sha256(api_key.encode()).digest()
+            ).decode()
+            credentials = await get_organization_credentials(api_key_hash=api_key_hash)
+            if credentials:
                 external_id = params[b"external_id"][0].decode()
                 external_id_hmac = params[b"external_id_hmac"][0].decode()
-                api_secret = decrypt(
-                    org.api_secret_encrypt, settings.WHISTLE_SECRET_KEY
-                )
+                api_secret = utils.decrypt(credentials.api_secret_cipher)
                 external_id_check = hmac.new(
                     api_secret.encode(), external_id.encode(), hashlib.sha256
                 ).hexdigest()
                 if external_id_check == external_id_hmac:
                     external_user = await get_external_user(
-                        organization=org, external_id=external_id
+                        organization=credentials.organization, external_id=external_id
                     )
                     if external_user:
                         scope["external_user"] = external_user
-                        scope["org"] = org
+                        scope["org"] = credentials.organization
                     else:
                         scope["error_code"] = "user_not_found"
                         scope["error_reason"] = (
@@ -55,7 +56,7 @@ class ClientAuthMiddleware:
                         logging.debug(
                             "User not found with external id: %s for org: %s while trying to connect websocket",
                             external_id,
-                            org.id,
+                            credentials.organization.id,
                         )
                 else:
                     scope["error_reason"] = (
@@ -65,7 +66,7 @@ class ClientAuthMiddleware:
                     scope["error_code"] = "invalid_external_id_hmac"
                     logging.debug(
                         "Invalid External Id HMAC provided while trying to connect websocket for org: %s",
-                        org.id,
+                        credentials.organization.id,
                     )
             else:
                 scope["error_code"] = "invalid_api_key"
@@ -95,10 +96,12 @@ class ClientAuthMiddleware:
 
 
 @database_sync_to_async
-def get_organization(**kwargs):
+def get_organization_credentials(**kwargs):
     try:
-        return Organization.objects.get(**kwargs)
-    except Organization.DoesNotExist:
+        return OrganizationCredentials.objects.select_related("organization").get(
+            **kwargs
+        )
+    except OrganizationCredentials.DoesNotExist:
         return None
 
 

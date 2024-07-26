@@ -208,41 +208,33 @@ def apply_filter_to_recipient(broadcast_id, org_id, filter_input, recipient_enti
     match filter_input["operator"]:
         case OperatorChoices.EQ.value:
             if filter_input["property"] in basic_fields:
-                metadata = recipient_entity.metadata
-                if not metadata or not metadata.get(filter_input["property"]):
+                if (
+                    getattr(recipient_entity, filter_input["property"])
+                    != filter_input["value"]
+                ):
                     return True
-                try:
-                    if datetime.strptime(
-                        getattr(recipient_entity, filter_input["property"]),
-                        settings.DATETIME_FORMAT,
-                    ) != datetime.strptime(filter_input["value"]):
-                        return True
-                except ValueError:
-                    if (
-                        getattr(recipient_entity, filter_input["property"])
-                        != filter_input["value"]
-                    ):
-                        return True
+            else:
+                metadata = recipient_entity.metadata
+                if not metadata.get(filter_input["property"]):
+                    return True
+                if metadata.get(filter_input["property"]) != filter_input["value"]:
+                    return True
         case OperatorChoices.NEQ.value:
             if filter_input["property"] in basic_fields:
-                metadata = recipient_entity.metadata
-                if not metadata or not metadata.get(filter_input["property"]):
+                if (
+                    getattr(recipient_entity, filter_input["property"])
+                    == filter_input["value"]
+                ):
                     return True
-                try:
-                    if datetime.strptime(
-                        getattr(recipient_entity, filter_input["property"]),
-                        settings.DATETIME_FORMAT,
-                    ) == datetime.strptime(filter_input["value"]):
-                        return True
-                except ValueError:
-                    if (
-                        getattr(recipient_entity, filter_input["property"])
-                        == filter_input["value"]
-                    ):
-                        return True
+            else:
+                metadata = recipient_entity.metadata
+                if not metadata.get(filter_input["property"]):
+                    return True
+                if metadata.get(filter_input["property"]) == filter_input["value"]:
+                    return True
         case OperatorChoices.GT.value:
             metadata = recipient_entity.metadata
-            if not metadata or not metadata.get(filter_input["property"]):
+            if not metadata.get(filter_input["property"]):
                 return True
             else:
                 try:
@@ -251,12 +243,12 @@ def apply_filter_to_recipient(broadcast_id, org_id, filter_input, recipient_enti
                         settings.DATETIME_FORMAT,
                     ) <= datetime.strptime(filter_input["value"]):
                         return True
-                except ValueError:
+                except (TypeError, ValueError):
                     if metadata.get(filter_input["property"]) <= filter_input["value"]:
                         return True
         case OperatorChoices.LT.value:
             metadata = recipient_entity.metadata
-            if not metadata or not metadata.get(filter_input["property"]):
+            if not metadata.get(filter_input["property"]):
                 return True
             else:
                 try:
@@ -265,12 +257,12 @@ def apply_filter_to_recipient(broadcast_id, org_id, filter_input, recipient_enti
                         settings.DATETIME_FORMAT,
                     ) >= datetime.strptime(filter_input["value"]):
                         return True
-                except ValueError:
+                except (TypeError, ValueError):
                     if metadata.get(filter_input["property"]) >= filter_input["value"]:
                         return True
         case OperatorChoices.GTE.value:
             metadata = recipient_entity.metadata
-            if not metadata or not metadata.get(filter_input["property"]):
+            if not metadata.get(filter_input["property"]):
                 return True
             else:
                 try:
@@ -279,12 +271,12 @@ def apply_filter_to_recipient(broadcast_id, org_id, filter_input, recipient_enti
                         settings.DATETIME_FORMAT,
                     ) < datetime.strptime(filter_input["value"]):
                         return True
-                except ValueError:
+                except (TypeError, ValueError):
                     if metadata.get(filter_input["property"]) < filter_input["value"]:
                         return True
         case OperatorChoices.LTE.value:
             metadata = recipient_entity.metadata
-            if not metadata or not metadata.get(filter_input["property"]):
+            if not metadata.get(filter_input["property"]):
                 return True
             else:
                 try:
@@ -293,12 +285,12 @@ def apply_filter_to_recipient(broadcast_id, org_id, filter_input, recipient_enti
                         settings.DATETIME_FORMAT,
                     ) > datetime.strptime(filter_input["value"]):
                         return True
-                except ValueError:
+                except (TypeError, ValueError):
                     if metadata.get(filter_input["property"]) > filter_input["value"]:
                         return True
         case OperatorChoices.CONTAINS.value:
             metadata = recipient_entity.metadata
-            if not metadata or not metadata.get(filter_input["property"]):
+            if not metadata.get(filter_input["property"]):
                 return True
             elif isinstance(
                 metadata.get(filter_input["property"]), str
@@ -314,7 +306,7 @@ def apply_filter_to_recipient(broadcast_id, org_id, filter_input, recipient_enti
                 return True
         case OperatorChoices.DOES_NOT_CONTAIN.value:
             metadata = recipient_entity.metadata
-            if not metadata or not metadata.get(filter_input["property"]):
+            if not metadata.get(filter_input["property"]):
                 return True
             elif isinstance(
                 metadata.get(filter_input["property"]), str

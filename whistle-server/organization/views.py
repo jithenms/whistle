@@ -1,11 +1,12 @@
-from django.conf import settings
-from keycove import decrypt
 from rest_framework import viewsets
 from rest_framework.generics import RetrieveAPIView
-from rest_framework.response import Response
+from rest_framework.viewsets import GenericViewSet
 
-from organization.models import Organization
-from organization.serializers import OrganizationSerializer
+from organization.models import Organization, OrganizationCredentials
+from organization.serializers import (
+    OrganizationSerializer,
+    OrganizationCredentialsSerializer,
+)
 from whistle_server.auth import ServerAuth
 
 
@@ -15,14 +16,12 @@ class OrganizationModelViewSet(viewsets.GenericViewSet):
 
 
 class OrganizationViewSet(RetrieveAPIView, OrganizationModelViewSet):
-    lookup_field = "clerk_org_id"
     queryset = Organization.objects.all()
     serializer_class = OrganizationSerializer
     authentication_classes = [ServerAuth]
 
-    def retrieve(self, request, *args, **kwargs):
-        instance = self.get_object()
-        api_key = decrypt(instance.api_key_encrypt, settings.WHISTLE_SECRET_KEY)
-        api_secret = decrypt(instance.api_secret_encrypt, settings.WHISTLE_SECRET_KEY)
-        serializer = self.get_serializer(instance)
-        return Response(dict(serializer.data, api_key=api_key, api_secret=api_secret))
+
+class OrganizationCredentialsViewSet(RetrieveAPIView, GenericViewSet):
+    queryset = OrganizationCredentials.objects.all()
+    serializer_class = OrganizationCredentialsSerializer
+    authentication_classes = [ServerAuth]

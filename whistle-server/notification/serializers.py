@@ -135,7 +135,7 @@ class BroadcastSerializer(serializers.ModelSerializer):
             "recipients",
             "schedule_at",
             "audience_id",
-            "data",
+            "merge_tags",
             "filters",
             "category",
             "topic",
@@ -192,10 +192,11 @@ class BroadcastSerializer(serializers.ModelSerializer):
 
         data["metadata"] = {}
 
-        if data["data"] and "email" not in data.get("channels", {}):
+        if data["merge_tags"] and "email" not in data.get("channels", {}):
             raise serializers.ValidationError(
                 {
-                    "data": "The 'data' field requires 'channels.email.sendgrid_template_id' to be specified."
+                    "merge_tags": "The 'merge_tags' field requires 'channels.email.sendgrid_template_id' to be "
+                    "specified."
                 },
                 "sendgrid_template_id_unspecified",
             )
@@ -212,7 +213,7 @@ class BroadcastSerializer(serializers.ModelSerializer):
             "filters",
             "audience_id",
             "schedule_at",
-            "data",
+            "merge_tags",
         ]:
             if field in validated_data:
                 validated_data.pop(field)

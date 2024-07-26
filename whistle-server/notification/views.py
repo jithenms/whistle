@@ -16,6 +16,7 @@ from notification.serializers import (
     NotificationSerializer,
     BroadcastSerializer,
 )
+from preference.models import ChannelChoices
 from whistle_server.auth import (
     ClientAuth,
     ServerAuth,
@@ -74,7 +75,11 @@ class NotificationViewSet(
                     "Invalid External Id. Please provide a valid External Id in the request header.",
                     "invalid_external_id",
                 )
-            return self.queryset.filter(organization=self.request.user, recipient=user)
+            return self.queryset.filter(
+                organization=self.request.user,
+                channel=ChannelChoices.IN_APP,
+                recipient=user,
+            )
         else:
             return self.queryset.filter(organization=self.request.user)
 

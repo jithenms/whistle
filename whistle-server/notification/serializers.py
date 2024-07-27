@@ -1,6 +1,5 @@
 from rest_framework import serializers
 
-from audience.serializers import FilterSerializer
 from connector.models import Sendgrid, Twilio, FCM, APNS
 from external_user.serializers import ExternalUserSerializer
 from notification.models import (
@@ -88,7 +87,6 @@ class BroadcastSerializer(serializers.ModelSerializer):
     recipients = ExternalUserSerializer(many=True, required=False)
     schedule_at = serializers.DateTimeField(required=False)
     audience_id = serializers.UUIDField(required=False, write_only=True)
-    filters = FilterSerializer(many=True, required=False, write_only=True)
     channels = BroadcastChannelSerializer(
         required=False, default=BroadcastChannelSerializer().data
     )
@@ -104,7 +102,6 @@ class BroadcastSerializer(serializers.ModelSerializer):
             "schedule_at",
             "audience_id",
             "merge_tags",
-            "filters",
             "category",
             "topic",
             "channels",
@@ -118,18 +115,6 @@ class BroadcastSerializer(serializers.ModelSerializer):
         read_only_fields = ("status",)
 
     def validate(self, data):
-        if "audience_id" in data and "filters" in data:
-            raise serializers.ValidationError(
-                "Cannot use both 'audience_id' and 'filters' together. Please specify only one.",
-                "audience_and_filters_unsupported",
-            )
-
-        if "audience_id" in data and "recipients" in data:
-            raise serializers.ValidationError(
-                "Cannot use both 'audience_id' and 'recipients' together. Please specify only one.",
-                "audience_and_recipients_unsupported",
-            )
-
         if data["channels"]["email"]["enabled"]:
             sendgrid = Sendgrid.objects.filter(
                 organization=self.context["request"].user

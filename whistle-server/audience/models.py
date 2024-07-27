@@ -30,7 +30,7 @@ class Filter(models.Model):
     )
     property = models.CharField(max_length=255)
     operator = models.CharField(choices=OperatorChoices.choices, max_length=255)
-    value = models.JSONField()
+    value = models.CharField()
 
     class Meta:
         unique_together = [["audience", "property"]]

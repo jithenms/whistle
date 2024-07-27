@@ -36,6 +36,7 @@ from external_user.models import ExternalUser, ExternalUserDevice, PlatformChoic
 from notification.models import Notification, Broadcast
 from preference.models import ExternalUserPreference, ChannelChoices
 from subscription.models import ExternalUserSubscription
+from whistle_server import utils
 from whistle_server.celery import app
 from whistle_server.client import CustomAPNSClient, CustomFCMNotification
 
@@ -44,7 +45,6 @@ basic_fields = {
     "phone",
     "first_name",
     "last_name",
-    "external_id",
 }
 
 
@@ -105,37 +105,23 @@ def send_broadcast(broadcast_id, org_id, data):
             organization_id=org_id, **filter_kwargs
         ).exclude(**exclude_kwargs)
 
-        logging.info(f"Recipients: {recipients}")
-
         for recipient in recipients.iterator():
             tasks.append(handle_recipient.s(broadcast_id, org_id, recipient.id, data))
             recipient_ids.add(recipient.id)
-    elif "recipients" in data:
-        if "filters" in data:
-            recipients_to_remove = []
-            for recipient in data["recipients"]:
-                recipient_entity = update_or_create_external_user(
-                    broadcast_id, org_id, recipient, data
-                )
-                if recipient_entity:
-                    for filter_input in data["filters"]:
-                        filtered = apply_filter_to_recipient(
-                            broadcast_id, org_id, filter_input, recipient_entity
-                        )
-                        if filtered:
-                            recipients_to_remove.append(recipient)
-            for recipient in recipients_to_remove:
-                data["recipients"].remove(recipient)
 
+    if "recipients" in data:
         for recipient in data["recipients"]:
             recipient_entity = update_or_create_external_user(
                 broadcast_id, org_id, recipient, data
             )
             if recipient_entity:
-                tasks.append(
-                    handle_recipient.s(broadcast_id, org_id, recipient_entity.id, data)
-                )
-                recipient_ids.add(recipient_entity.id)
+                if recipient_entity.id not in recipient_ids:
+                    tasks.append(
+                        handle_recipient.s(
+                            broadcast_id, org_id, recipient_entity.id, data
+                        )
+                    )
+                    recipient_ids.add(recipient_entity.id)
 
     if "topic" in data:
         subscribers = ExternalUserSubscription.objects.filter(
@@ -147,13 +133,11 @@ def send_broadcast(broadcast_id, org_id, data):
                 tasks.append(
                     handle_topic_subscriber.s(broadcast_id, org_id, subscriber, data)
                 )
+                recipient_ids.add(subscriber.id)
 
     if "schedule_at" in data:
         entry = RedBeatSchedulerEntry.from_key(f"redbeat:{broadcast_id}", app=app)
         entry.delete()
-        logging.info(
-            "Removed scheduled task after invoking for broadcast: %s", broadcast_id
-        )
 
     result = chord(tasks)(update_broadcast_status.s(broadcast_id, "processed"))
 
@@ -163,24 +147,23 @@ def send_broadcast(broadcast_id, org_id, data):
 def build_filter_kwargs(filters):
     query_kwargs = {}
     for filter_rec in filters:
-        match filter_rec.operator.upper():
-            case OperatorChoices.EQ.value:
-                if filter_rec.property in basic_fields:
-                    query_kwargs[filter_rec.property] = filter_rec.value
-                else:
-                    query_kwargs[f"metadata__{filter_rec.property}"] = filter_rec.value
-            case OperatorChoices.GT.value:
-                query_kwargs[f"metadata__{filter_rec.property}__gt"] = filter_rec.value
-            case OperatorChoices.LT.value:
-                query_kwargs[f"metadata__{filter_rec.property}__lt"] = filter_rec.value
-            case OperatorChoices.GTE.value:
-                query_kwargs[f"metadata__{filter_rec.property}__gte"] = filter_rec.value
-            case OperatorChoices.LTE.value:
-                query_kwargs[f"metadata__{filter_rec.property}__lte"] = filter_rec.value
-            case OperatorChoices.CONTAINS.value:
-                query_kwargs[f"metadata__{filter_rec.property}__contains"] = (
-                    filter_rec.value
-                )
+        filter_rec.property = filter_rec.property.replace(".", "__")
+        if filter_rec.property in basic_fields:
+            filter_rec.property = f"{filter_rec.property}_hash"
+            filter_rec.value = utils.hash_value(filter_rec.value)
+        match filter_rec.operator:
+            case OperatorChoices.EQ:
+                query_kwargs[filter_rec.property] = filter_rec.value
+            case OperatorChoices.GT:
+                query_kwargs[f"{filter_rec.property}__gt"] = filter_rec.value
+            case OperatorChoices.LT:
+                query_kwargs[f"{filter_rec.property}__lt"] = filter_rec.value
+            case OperatorChoices.GTE:
+                query_kwargs[f"{filter_rec.property}__gte"] = filter_rec.value
+            case OperatorChoices.LTE:
+                query_kwargs[f"{filter_rec.property}__lte"] = filter_rec.value
+            case OperatorChoices.CONTAINS:
+                query_kwargs[f"{filter_rec.property}__contains"] = filter_rec.value
             case _:
                 continue
     return query_kwargs
@@ -189,141 +172,15 @@ def build_filter_kwargs(filters):
 def build_exclude_kwargs(filters):
     query_kwargs = {}
     for filter_rec in filters:
+        filter_rec.property = filter_rec.property.replace(".", "__")
         match filter_rec.operator:
             case OperatorChoices.NEQ:
-                if filter_rec.property in basic_fields:
-                    query_kwargs[filter_rec.property] = filter_rec.value
-                else:
-                    query_kwargs[f"metadata__{filter_rec.property}"] = filter_rec.value
+                query_kwargs[filter_rec.property] = filter_rec.value
             case OperatorChoices.DOES_NOT_CONTAIN.value:
-                query_kwargs[f"metadata__{filter_rec.property}__contains"] = (
-                    filter_rec.value
-                )
+                query_kwargs[f"{filter_rec.property}__contains"] = filter_rec.value
             case _:
                 continue
     return query_kwargs
-
-
-def apply_filter_to_recipient(broadcast_id, org_id, filter_input, recipient_entity):
-    match filter_input["operator"]:
-        case OperatorChoices.EQ.value:
-            if filter_input["property"] in basic_fields:
-                if (
-                    getattr(recipient_entity, filter_input["property"])
-                    != filter_input["value"]
-                ):
-                    return True
-            else:
-                metadata = recipient_entity.metadata
-                if not metadata.get(filter_input["property"]):
-                    return True
-                if metadata.get(filter_input["property"]) != filter_input["value"]:
-                    return True
-        case OperatorChoices.NEQ.value:
-            if filter_input["property"] in basic_fields:
-                if (
-                    getattr(recipient_entity, filter_input["property"])
-                    == filter_input["value"]
-                ):
-                    return True
-            else:
-                metadata = recipient_entity.metadata
-                if not metadata.get(filter_input["property"]):
-                    return True
-                if metadata.get(filter_input["property"]) == filter_input["value"]:
-                    return True
-        case OperatorChoices.GT.value:
-            metadata = recipient_entity.metadata
-            if not metadata.get(filter_input["property"]):
-                return True
-            else:
-                try:
-                    if datetime.strptime(
-                        metadata.get(filter_input["property"]),
-                        settings.DATETIME_FORMAT,
-                    ) <= datetime.strptime(filter_input["value"]):
-                        return True
-                except (TypeError, ValueError):
-                    if metadata.get(filter_input["property"]) <= filter_input["value"]:
-                        return True
-        case OperatorChoices.LT.value:
-            metadata = recipient_entity.metadata
-            if not metadata.get(filter_input["property"]):
-                return True
-            else:
-                try:
-                    if datetime.strptime(
-                        metadata.get(filter_input["property"]),
-                        settings.DATETIME_FORMAT,
-                    ) >= datetime.strptime(filter_input["value"]):
-                        return True
-                except (TypeError, ValueError):
-                    if metadata.get(filter_input["property"]) >= filter_input["value"]:
-                        return True
-        case OperatorChoices.GTE.value:
-            metadata = recipient_entity.metadata
-            if not metadata.get(filter_input["property"]):
-                return True
-            else:
-                try:
-                    if datetime.strptime(
-                        metadata.get(filter_input["property"]),
-                        settings.DATETIME_FORMAT,
-                    ) < datetime.strptime(filter_input["value"]):
-                        return True
-                except (TypeError, ValueError):
-                    if metadata.get(filter_input["property"]) < filter_input["value"]:
-                        return True
-        case OperatorChoices.LTE.value:
-            metadata = recipient_entity.metadata
-            if not metadata.get(filter_input["property"]):
-                return True
-            else:
-                try:
-                    if datetime.strptime(
-                        metadata.get(filter_input["property"]),
-                        settings.DATETIME_FORMAT,
-                    ) > datetime.strptime(filter_input["value"]):
-                        return True
-                except (TypeError, ValueError):
-                    if metadata.get(filter_input["property"]) > filter_input["value"]:
-                        return True
-        case OperatorChoices.CONTAINS.value:
-            metadata = recipient_entity.metadata
-            if not metadata.get(filter_input["property"]):
-                return True
-            elif isinstance(
-                metadata.get(filter_input["property"]), str
-            ) and filter_input["value"] not in metadata.get(
-                filter_input["property"], ""
-            ):
-                return True
-            elif isinstance(
-                metadata.get(filter_input["property"]), list
-            ) and filter_input["value"] not in metadata.get(
-                filter_input["property"], []
-            ):
-                return True
-        case OperatorChoices.DOES_NOT_CONTAIN.value:
-            metadata = recipient_entity.metadata
-            if not metadata.get(filter_input["property"]):
-                return True
-            elif isinstance(
-                metadata.get(filter_input["property"]), str
-            ) and filter_input["value"] in metadata.get(filter_input["property"], ""):
-                return True
-            elif isinstance(
-                metadata.get(filter_input["property"]), list
-            ) and filter_input["value"] in metadata.get(filter_input["property"], []):
-                return True
-        case _:
-            logging.debug(
-                "Broadcast: %s with org: %s passed unsupported operator: %s",
-                broadcast_id,
-                org_id,
-                filter_input["operator"],
-            )
-    return False
 
 
 @app.task
@@ -495,6 +352,7 @@ def send_email(broadcast_id, org_id, user_id, data):
             data["channels"]["email"].get("action_link", data.get("action_link")),
             channel=ChannelChoices.EMAIL,
             status="sent",
+            sent_at=datetime.now(timezone.utc),
             metadata={"sg_x_message_id": response.headers["X-Message-ID"]},
         )
 
@@ -628,6 +486,7 @@ def send_push(broadcast_id, org_id, user_id, data):
                         ),
                         channel=ChannelChoices.PUSH,
                         status="sent",
+                        sent_at=datetime.now(timezone.utc),
                         metadata={"platform": PlatformChoices.IOS.value},
                     )
 
@@ -696,6 +555,7 @@ def send_push(broadcast_id, org_id, user_id, data):
                         ),
                         channel=ChannelChoices.PUSH,
                         status="sent",
+                        sent_at=datetime.now(timezone.utc),
                         metadata={"platform": PlatformChoices.ANDROID.value},
                     )
 

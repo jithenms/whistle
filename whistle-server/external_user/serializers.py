@@ -15,7 +15,7 @@ class ExternalUserSerializer(serializers.ModelSerializer):
     last_name = serializers.CharField(max_length=255, required=False)
     email = serializers.CharField(max_length=255, required=False)
     phone = serializers.CharField(max_length=255, required=False)
-    metadata = serializers.JSONField(required=False)
+    metadata = serializers.JSONField(required=False, default=dict)
 
     class Meta:
         model = ExternalUser
@@ -32,7 +32,6 @@ class ExternalUserSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         org = self.context["request"].user
         validated_data["organization"] = org
-        validated_data["metadata"] = {}
         response = super().create(validated_data)
         logging.info(
             "External user with id: %s created for org: %s", response.id, org.id

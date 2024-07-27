@@ -1,5 +1,6 @@
 import logging
 import uuid
+from datetime import datetime, timezone
 
 from django.http import JsonResponse
 from drf_spectacular.utils import extend_schema, OpenApiParameter
@@ -140,7 +141,7 @@ class BroadcastViewSet(
                     "invalid_audience_id",
                 )
 
-        instance = serializer.save(status="queued")
+        instance = serializer.save(status="queued", sent_at=datetime.now(timezone.utc))
         try:
             schedule_at = serializer.validated_data.get("schedule_at")
             if schedule_at:

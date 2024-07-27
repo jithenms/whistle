@@ -17,11 +17,23 @@ class OrganizationCredentials(models.Model):
     organization = models.OneToOneField(
         Organization, on_delete=models.CASCADE, primary_key=True
     )
+
     api_key = utils.EncryptedField(key_id="alias/APICredentials")
     api_key_hash = models.TextField(unique=True)
+
     api_secret = utils.EncryptedField(key_id="alias/APICredentials")
     api_secret_hash = models.TextField(unique=True)
+
     api_secret_salt = models.TextField(unique=True)
+
+    def save(self, *args, **kwargs):
+        if self.api_key:
+            self.api_key_hash = utils.hash_value(self.api_key)
+        if self.api_secret:
+            self.api_secret_hash = utils.hash_value(
+                self.api_secret, self.api_secret_salt
+            )
+        return super().save(*args, **kwargs)
 
 
 class OrganizationMember(models.Model):

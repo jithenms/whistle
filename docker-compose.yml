@@ -2,13 +2,13 @@ services:
   api:
     build:
       context: .
-      dockerfile: ./whistle-server/Dockerfile
+      dockerfile: ./whistle/Dockerfile
     entrypoint: /usr/local/bin/start-api.sh
     command: --workers=1
     ports:
       - 8080:8080
     env_file:
-      - ./whistle-server/whistle_server/.env
+      - ./whistle/whistle/.env
     depends_on:
       - redis
       - db
@@ -16,12 +16,12 @@ services:
   websockets:
     build:
       context: .
-      dockerfile: ./whistle-server/Dockerfile
+      dockerfile: ./whistle/Dockerfile
     entrypoint: /usr/local/bin/start-websockets.sh
     ports:
       - 8081:8081
     env_file:
-      - ./whistle-server/whistle_server/.env
+      - ./whistle/whistle/.env
     depends_on:
       - redis
       - db
@@ -29,11 +29,11 @@ services:
   worker:
     build:
       context: .
-      dockerfile: ./whistle-server/Dockerfile
+      dockerfile: ./whistle/Dockerfile
     entrypoint: /usr/local/bin/start-worker.sh
     command: --concurrency=1 --loglevel=DEBUG
     env_file:
-      - ./whistle-server/whistle_server/.env
+      - ./whistle/whistle/.env
     depends_on:
       - redis
       - db
@@ -41,11 +41,11 @@ services:
   scheduler:
     build:
       context: .
-      dockerfile: ./whistle-server/Dockerfile
+      dockerfile: ./whistle/Dockerfile
     entrypoint: /usr/local/bin/start-scheduler.sh
     command: --loglevel=DEBUG
     env_file:
-      - ./whistle-server/whistle_server/.env
+      - ./whistle/whistle/.env
     depends_on:
       - redis
       - worker
@@ -69,7 +69,7 @@ services:
     image: mher/flower
     command: celery flower
     env_file:
-      - ./whistle-server/whistle_server/.env
+      - ./whistle/whistle/.env
     ports:
       - 5555:5555
     depends_on:

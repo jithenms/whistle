@@ -1,3 +1,3 @@
 #!/bin/bash
 
-celery -A whistle_server worker "$@" 
+celery -A whistle worker "$@" 

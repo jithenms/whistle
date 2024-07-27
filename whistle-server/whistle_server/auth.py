@@ -237,7 +237,6 @@ def generate_api_credentials():
     api_secret = secrets.token_urlsafe(64)
     api_secret_salt = secrets.token_urlsafe(8)
 
-    logging.info(api_secret_salt)
     return (
         api_key,
         api_secret,

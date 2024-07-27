@@ -8,6 +8,7 @@ from external_user.models import ExternalUser
 from subscription.models import ExternalUserSubscription
 from subscription.serializers import ExternalUserSubscriptionSerializer
 from whistle_server.auth import ClientAuth, IsValidExternalId
+from whistle_server.pagination import StandardLimitOffsetPagination
 
 
 class ExternalUserSubscriptionViewSet(ModelViewSet):
@@ -15,6 +16,7 @@ class ExternalUserSubscriptionViewSet(ModelViewSet):
     serializer_class = ExternalUserSubscriptionSerializer
     authentication_classes = [ClientAuth]
     permission_classes = [IsValidExternalId]
+    pagination_class = StandardLimitOffsetPagination
 
     def get_queryset(self):
         external_id = self.request.headers.get("X-External-Id")

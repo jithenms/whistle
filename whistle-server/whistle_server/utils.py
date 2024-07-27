@@ -76,3 +76,7 @@ class EncryptedField(models.TextField):
 
     def to_python(self, value):
         return value
+
+
+def hash_value(value, salt=""):
+    return base64.b64encode(hashlib.sha256((value + salt).encode()).digest()).decode()

@@ -15,7 +15,7 @@ class ExternalUserSerializer(serializers.ModelSerializer):
     last_name = serializers.CharField(max_length=255, required=False)
     email = serializers.CharField(max_length=255, required=False)
     phone = serializers.CharField(max_length=255, required=False)
-    metadata = serializers.JSONField(required=False, default={})
+    metadata = serializers.JSONField(required=False, default=dict)
 
     class Meta:
         model = ExternalUser

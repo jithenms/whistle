@@ -1,4 +1,3 @@
-import base64
 import hashlib
 import hmac
 import logging
@@ -15,6 +14,7 @@ from rest_framework.permissions import BasePermission
 from organization.models import Organization, OrganizationCredentials
 from organization.models import OrganizationMember
 from user.models import User
+from whistle_server import utils
 
 jwks_client = PyJWKClient(settings.JWKS_ENDPOINT_URL)
 
@@ -73,17 +73,13 @@ class ServerAuth(BaseAuthentication):
                 )
             else:
                 try:
-                    api_key_hash = base64.b64encode(
-                        hashlib.sha256(api_key.encode()).digest()
-                    ).decode()
+                    api_key_hash = utils.hash_value(api_key)
                     credentials = OrganizationCredentials.objects.select_related(
                         "organization"
                     ).get(api_key_hash=api_key_hash)
-                    api_secret_hash = base64.b64encode(
-                        hashlib.sha256(
-                            (api_secret + credentials.api_secret_salt).encode()
-                        ).digest()
-                    ).decode()
+                    api_secret_hash = utils.hash_value(
+                        api_secret, credentials.api_secret_salt
+                    )
                     if api_secret_hash != credentials.api_secret_hash:
                         logging.debug(
                             "API secret invalid for org: %s",
@@ -96,7 +92,6 @@ class ServerAuth(BaseAuthentication):
                     else:
                         return credentials.organization, None
                 except OrganizationCredentials.DoesNotExist:
-                    logging.debug("API key invalid.")
                     raise AuthenticationFailed(
                         "API key invalid. You can find your API key in Whistle settings.",
                         "invalid_api_key",
@@ -138,9 +133,7 @@ class ClientAuth(BaseAuthentication):
                 )
         else:
             api_key = request.headers.get("X-API-Key")
-            api_key_hash = base64.b64encode(
-                hashlib.sha256(api_key.encode()).digest()
-            ).decode()
+            api_key_hash = utils.hash_value(api_key)
             try:
                 credentials = OrganizationCredentials.objects.select_related(
                     "organization"
@@ -209,18 +202,14 @@ def update_or_create_organization(data):
         if org_created:
             (
                 api_key,
-                api_key_hash,
                 api_secret,
-                api_secret_hash,
                 api_secret_salt,
             ) = generate_api_credentials()
 
             OrganizationCredentials.objects.create(
                 organization=org,
                 api_key=api_key,
-                api_key_hash=api_key_hash,
                 api_secret=api_secret,
-                api_secret_hash=api_secret_hash,
                 api_secret_salt=api_secret_salt,
             )
 
@@ -246,17 +235,10 @@ def update_or_create_organization_member(data, user, org):
 def generate_api_credentials():
     api_key = secrets.token_urlsafe(32)
     api_secret = secrets.token_urlsafe(64)
-
     api_secret_salt = secrets.token_urlsafe(8)
-    api_key_hash = base64.b64encode(hashlib.sha256(api_key.encode()).digest()).decode()
-    api_secret_hash = base64.b64encode(
-        hashlib.sha256((api_secret + api_secret_salt).encode()).digest()
-    ).decode()
 
     return (
         api_key,
-        api_key_hash,
         api_secret,
-        api_secret_hash,
         api_secret_salt,
     )

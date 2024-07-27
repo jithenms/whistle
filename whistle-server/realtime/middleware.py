@@ -1,4 +1,3 @@
-import base64
 import hashlib
 import hmac
 import logging
@@ -10,6 +9,7 @@ from jwt import PyJWKClient
 
 from external_user.models import ExternalUser
 from organization.models import OrganizationCredentials
+from whistle_server import utils
 
 jwks_client = PyJWKClient(settings.JWKS_ENDPOINT_URL)
 
@@ -28,9 +28,7 @@ class ClientAuthMiddleware:
         ):
             api_key = headers[b"sec-websocket-protocol"].decode()
             scope["api_key"] = api_key
-            api_key_hash = base64.b64encode(
-                hashlib.sha256(api_key.encode()).digest()
-            ).decode()
+            api_key_hash = utils.hash_value(api_key)
             credentials = await get_organization_credentials(api_key_hash=api_key_hash)
             if credentials:
                 external_id = params[b"external_id"][0].decode()

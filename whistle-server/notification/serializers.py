@@ -1,77 +1,41 @@
 from rest_framework import serializers
 
-from audience.serializers import FilterSerializer
 from connector.models import Sendgrid, Twilio, FCM, APNS
 from external_user.serializers import ExternalUserSerializer
 from notification.models import (
     Notification,
     Broadcast,
-    NotificationChannel,
 )
 
 
-class ChannelEmailSerializer(serializers.Serializer):
-    subject = serializers.CharField(max_length=255, required=False)
+class InAppSerializer(serializers.Serializer):
+    title = serializers.CharField(max_length=255, required=False)
+    content = serializers.CharField(max_length=255, required=False)
+    enabled = serializers.BooleanField()
+
+
+class EmailSerializer(serializers.Serializer):
+    title = serializers.CharField(max_length=255, required=False)
     content = serializers.CharField(max_length=255, required=False)
     sendgrid_template_id = serializers.CharField(max_length=255, required=False)
-
-    def validate(self, data):
-        subject = data.get("subject")
-        content = data.get("content")
-        sendgrid_template_id = data.get("sendgrid_template_id")
-
-        if not sendgrid_template_id:
-            if subject and not content:
-                raise serializers.ValidationError(
-                    {
-                        "content": "You must provide content for the email if using a subject."
-                    },
-                    "missing_email_content",
-                )
-            if content and not subject:
-                raise serializers.ValidationError(
-                    {
-                        "subject": "You must provide a subject for the email if using content."
-                    },
-                    "missing_email_subject",
-                )
-            if not subject and not content:
-                raise serializers.ValidationError(
-                    {
-                        "sendgrid_template_id": "The 'sendgrid_template_id' field is required "
-                        "if both 'subject' and 'content' are not provided.",
-                        "subject": "The 'subject' field is required if 'sendgrid_template_id' is not provided.",
-                        "content": "The 'content' field is required if 'sendgrid_template_id' is not provided.",
-                    },
-                    "invalid_email_params",
-                )
-
-        return data
+    enabled = serializers.BooleanField()
 
 
-class ChannelSMSSerializer(serializers.Serializer):
-    body = serializers.CharField(max_length=255)
+class SMSSerializer(serializers.Serializer):
+    title = serializers.CharField(max_length=255, required=False)
+    content = serializers.CharField(max_length=255, required=False)
+    enabled = serializers.BooleanField()
 
 
-class ChannelMobilePushSerializer(serializers.Serializer):
-    title = serializers.CharField(max_length=255)
-    subtitle = serializers.CharField(max_length=255, required=False)
-    body = serializers.CharField(max_length=255)
+class PushSerializer(serializers.Serializer):
+    title = serializers.CharField(max_length=255, required=False)
+    content = serializers.CharField(max_length=255, required=False)
     badge = serializers.CharField(max_length=255, required=False)
     sound = serializers.CharField(max_length=255, required=False)
-
-
-class NotificationChannelSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = NotificationChannel
-        fields = ["slug", "status", "reason", "metadata"]
+    enabled = serializers.BooleanField()
 
 
 class NotificationSerializer(serializers.ModelSerializer):
-    recipient = ExternalUserSerializer(read_only=True)
-    channels = NotificationChannelSerializer(many=True, read_only=True)
-    additional_info = serializers.JSONField(required=False, default=dict)
-
     seen_at = serializers.DateTimeField(required=False)
     read_at = serializers.DateTimeField(required=False)
     archived_at = serializers.DateTimeField(required=False)
@@ -81,30 +45,30 @@ class NotificationSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "broadcast_id",
-            "recipient",
-            "channels",
-            "category",
-            "topic",
+            "recipient_id",
             "title",
             "content",
             "action_link",
-            "additional_info",
+            "channel",
+            "status",
+            "error_reason",
+            "metadata",
             "sent_at",
             "seen_at",
             "read_at",
             "archived_at",
         ]
-        read_only_fields = ("recipient", "sent_at")
+        read_only_fields = ("broadcast_id", "recipient_id", "sent_at")
 
     def update(self, instance, validated_data):
         for field in [
-            "channels",
+            "channel",
             "external_id",
-            "category",
-            "topic",
             "title",
             "content",
             "action_link",
+            "status",
+            "error_reason",
         ]:
             if field in validated_data:
                 validated_data.pop(field)
@@ -112,9 +76,10 @@ class NotificationSerializer(serializers.ModelSerializer):
 
 
 class BroadcastChannelSerializer(serializers.Serializer):
-    email = ChannelEmailSerializer(required=False)
-    sms = ChannelSMSSerializer(required=False)
-    mobile_push = ChannelMobilePushSerializer(required=False)
+    in_app = InAppSerializer(required=False, default=InAppSerializer().data)
+    email = EmailSerializer(required=False, default=EmailSerializer().data)
+    sms = SMSSerializer(required=False, default=SMSSerializer().data)
+    push = PushSerializer(required=False, default=PushSerializer().data)
 
 
 class BroadcastSerializer(serializers.ModelSerializer):
@@ -122,8 +87,9 @@ class BroadcastSerializer(serializers.ModelSerializer):
     recipients = ExternalUserSerializer(many=True, required=False)
     schedule_at = serializers.DateTimeField(required=False)
     audience_id = serializers.UUIDField(required=False, write_only=True)
-    filters = FilterSerializer(many=True, required=False, write_only=True)
-    channels = BroadcastChannelSerializer(required=False)
+    channels = BroadcastChannelSerializer(
+        required=False, default=BroadcastChannelSerializer().data
+    )
     additional_info = serializers.JSONField(required=False, default=dict)
     merge_tags = serializers.JSONField(required=False, write_only=True, default=dict)
     metadata = serializers.JSONField(read_only=True, default=dict)
@@ -136,7 +102,6 @@ class BroadcastSerializer(serializers.ModelSerializer):
             "schedule_at",
             "audience_id",
             "merge_tags",
-            "filters",
             "category",
             "topic",
             "channels",
@@ -150,19 +115,7 @@ class BroadcastSerializer(serializers.ModelSerializer):
         read_only_fields = ("status",)
 
     def validate(self, data):
-        if "audience_id" in data and "filters" in data:
-            raise serializers.ValidationError(
-                "Cannot use both 'audience_id' and 'filters' together. Please specify only one.",
-                "audience_and_filters_unsupported",
-            )
-
-        if "audience_id" in data and "recipients" in data:
-            raise serializers.ValidationError(
-                "Cannot use both 'audience_id' and 'recipients' together. Please specify only one.",
-                "audience_and_recipients_unsupported",
-            )
-
-        if "email" in data.get("channels", {}):
+        if data["channels"]["email"]["enabled"]:
             sendgrid = Sendgrid.objects.filter(
                 organization=self.context["request"].user
             )
@@ -172,7 +125,7 @@ class BroadcastSerializer(serializers.ModelSerializer):
                     "sendgrid_account_not_configured",
                 )
 
-        if "sms" in data.get("channels", {}):
+        if data["channels"]["sms"]["enabled"]:
             twilio = Twilio.objects.filter(organization=self.context["request"].user)
             if not twilio:
                 raise serializers.ValidationError(
@@ -180,7 +133,7 @@ class BroadcastSerializer(serializers.ModelSerializer):
                     "twilio_account_not_configured",
                 )
 
-        if "mobile_push" in data.get("channels", {}):
+        if data["channels"]["push"]["enabled"]:
             fcm = FCM.objects.filter(organization=self.context["request"].user)
             apns = APNS.objects.filter(organization=self.context["request"].user)
 

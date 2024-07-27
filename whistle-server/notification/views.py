@@ -1,5 +1,6 @@
 import logging
 import uuid
+from datetime import datetime, timezone
 
 from django.http import JsonResponse
 from drf_spectacular.utils import extend_schema, OpenApiParameter
@@ -16,6 +17,7 @@ from notification.serializers import (
     NotificationSerializer,
     BroadcastSerializer,
 )
+from preference.models import ChannelChoices
 from whistle_server.auth import (
     ClientAuth,
     ServerAuth,
@@ -74,7 +76,11 @@ class NotificationViewSet(
                     "Invalid External Id. Please provide a valid External Id in the request header.",
                     "invalid_external_id",
                 )
-            return self.queryset.filter(organization=self.request.user, recipient=user)
+            return self.queryset.filter(
+                organization=self.request.user,
+                channel=ChannelChoices.IN_APP,
+                recipient=user,
+            )
         else:
             return self.queryset.filter(organization=self.request.user)
 
@@ -135,7 +141,7 @@ class BroadcastViewSet(
                     "invalid_audience_id",
                 )
 
-        instance = serializer.save(status="queued")
+        instance = serializer.save(status="queued", sent_at=datetime.now(timezone.utc))
         try:
             schedule_at = serializer.validated_data.get("schedule_at")
             if schedule_at:

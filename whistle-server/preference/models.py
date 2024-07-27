@@ -17,10 +17,10 @@ class ExternalUserPreference(models.Model):
 
 
 class ChannelChoices(models.TextChoices):
-    WEB = "WEB", "WEB"
+    IN_APP = "IN_APP", "IN_APP"
     EMAIL = "EMAIL", "EMAIL"
     SMS = "SMS", "SMS"
-    MOBILE_PUSH = "MOBILE_PUSH", "MOBILE_PUSH"
+    PUSH = "PUSH", "PUSH"
 
 
 class ExternalUserPreferenceChannel(models.Model):

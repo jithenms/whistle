@@ -88,6 +88,8 @@ REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
 }
 
+import whistle_server.schema
+
 SPECTACULAR_SETTINGS = {
     "TITLE": "Whistle API",
     "DESCRIPTION": "REST API for the Whistle notification platform",

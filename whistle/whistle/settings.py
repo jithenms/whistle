@@ -88,14 +88,13 @@ REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
 }
 
-import whistle.schema
-
 SPECTACULAR_SETTINGS = {
     "TITLE": "Whistle API",
     "DESCRIPTION": "REST API for the Whistle notification platform",
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
-    # OTHER SETTINGS
+    "COMPONENT_SPLIT_REQUEST": True,
+    'PREPROCESSING_HOOKS': ["whistle.extensions.preprocess_endpoints"]
 }
 
 ROOT_URLCONF = "whistle.urls"

@@ -27,6 +27,9 @@ from organization.views import OrganizationViewSet, OrganizationCredentialsViewS
 from preference.views import ExternalUserPreferenceViewSet
 from subscription.views import ExternalUserSubscriptionViewSet
 
+# DO NOT REMOVE used for openapi spec generation
+import whistle.extensions
+
 v1_router = DefaultRouter()
 v1_router.register(
     r"organizations/credentials",

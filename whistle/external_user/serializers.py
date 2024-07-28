@@ -13,7 +13,7 @@ class ExternalUserSerializer(serializers.ModelSerializer):
     external_id = serializers.CharField(max_length=255, required=False)
     first_name = serializers.CharField(max_length=255, required=False)
     last_name = serializers.CharField(max_length=255, required=False)
-    email = serializers.CharField(max_length=255, required=False)
+    email = serializers.CharField(max_length=255)
     phone = serializers.CharField(max_length=255, required=False)
     metadata = serializers.JSONField(required=False, default=dict)
 

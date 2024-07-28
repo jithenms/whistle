@@ -4,7 +4,6 @@ from rest_framework import serializers
 
 from audience.models import Audience
 from connector.models import Sendgrid, Twilio, FCM, APNS
-from external_user.serializers import ExternalUserSerializer
 from notification.models import (
     Notification,
     Broadcast,
@@ -39,10 +38,6 @@ class PushSerializer(serializers.Serializer):
 
 
 class NotificationSerializer(serializers.ModelSerializer):
-    seen_at = serializers.DateTimeField(required=False)
-    read_at = serializers.DateTimeField(required=False)
-    archived_at = serializers.DateTimeField(required=False)
-
     class Meta:
         model = Notification
         fields = [
@@ -59,9 +54,10 @@ class NotificationSerializer(serializers.ModelSerializer):
             "sent_at",
             "seen_at",
             "read_at",
+            "clicked_at",
             "archived_at",
         ]
-        read_only_fields = ("broadcast_id", "recipient_id", "sent_at")
+        read_only_fields = ("broadcast_id", "recipient_id", "sent_at", "channel", "status", "error_reason")
 
     def update(self, instance, validated_data):
         for field in [
@@ -85,8 +81,33 @@ class BroadcastChannelSerializer(serializers.Serializer):
     push = PushSerializer(required=False, default=PushSerializer().data)
 
 
+class BroadcastRecipientSerializer(serializers.Serializer):
+    external_id = serializers.CharField(max_length=255, required=False)
+    first_name = serializers.CharField(max_length=255, required=False)
+    last_name = serializers.CharField(max_length=255, required=False)
+    email = serializers.CharField(max_length=255, required=False)
+    phone = serializers.CharField(max_length=255, required=False)
+
+    class Meta:
+        fields = [
+            "external_id",
+            "first_name",
+            "last_name",
+            "email",
+            "phone",
+        ]
+
+    def validate(self, data):
+        if "email" not in data and "external_id" not in data:
+            raise serializers.ValidationError(
+                "'email' or 'external_id' not provided for a recipient. Please provide either an 'email' or "
+                "'external_id' for this recipient.",
+                "email_or_external_id_not_provided",
+            )
+
+
 class BroadcastSerializer(serializers.ModelSerializer):
-    recipients = ExternalUserSerializer(many=True, required=False)
+    recipients = BroadcastRecipientSerializer(many=True, required=False, default=list)
     schedule_at = serializers.DateTimeField(required=False)
     audience_id = serializers.UUIDField(required=False, write_only=True)
     channels = BroadcastChannelSerializer(
@@ -117,6 +138,12 @@ class BroadcastSerializer(serializers.ModelSerializer):
         read_only_fields = ("status",)
 
     def validate(self, data):
+        if not data.get("recipients", []) and "audience_id" not in data:
+            raise serializers.ValidationError(
+                "'recipients' or 'audience_id' not provided. Please provide either 'recipients' or an 'audience_id'.",
+                "recipients_or_audience_id_not_provided",
+            )
+
         if "audience_id" in data:
             try:
                 Audience.objects.get(

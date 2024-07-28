@@ -35,6 +35,7 @@ class Notification(models.Model):
     error_reason = models.CharField(max_length=255, blank=True)
     metadata = models.JSONField(null=True, blank=True)
     sent_at = models.DateTimeField(null=True, blank=True)
+    clicked_at = models.DateTimeField(null=True, blank=True)
     seen_at = models.DateTimeField(null=True, blank=True)
     read_at = models.DateTimeField(null=True, blank=True)
     archived_at = models.DateTimeField(null=True, blank=True)

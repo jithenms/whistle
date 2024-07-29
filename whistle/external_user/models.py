@@ -3,20 +3,24 @@ import uuid
 from django.db import models
 
 from organization.models import Organization
-from whistle import fields, utils
+from whistle import fields, utils, settings
 
 
 class ExternalUser(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE)
     external_id = models.CharField()
-    first_name = fields.EncryptedField(key_id="alias/PersonalData", null=True)
+    first_name = fields.EncryptedField(
+        key_id=settings.KMS_PERSONAL_DATA_KEY_ARN, null=True
+    )
     first_name_hash = models.CharField(null=True)
-    last_name = fields.EncryptedField(key_id="alias/PersonalData", null=True)
+    last_name = fields.EncryptedField(
+        key_id=settings.KMS_PERSONAL_DATA_KEY_ARN, null=True
+    )
     last_name_hash = models.CharField(null=True)
-    email = fields.EncryptedField(key_id="alias/PersonalData")
+    email = fields.EncryptedField(key_id=settings.KMS_PERSONAL_DATA_KEY_ARN)
     email_hash = models.CharField()
-    phone = fields.EncryptedField(key_id="alias/PersonalData", null=True)
+    phone = fields.EncryptedField(key_id=settings.KMS_PERSONAL_DATA_KEY_ARN, null=True)
     phone_hash = models.CharField(null=True)
     metadata = models.JSONField(null=True, blank=True)
 

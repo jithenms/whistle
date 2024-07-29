@@ -3,6 +3,7 @@ import uuid
 from django.db import models
 
 from organization.models import Organization
+from whistle import fields, settings
 
 
 class Audience(models.Model):
@@ -30,7 +31,7 @@ class Filter(models.Model):
     )
     property = models.CharField()
     operator = models.CharField(choices=OperatorChoices.choices)
-    value = models.CharField()
+    value = fields.EncryptedField(key_id=settings.KMS_PERSONAL_DATA_KEY_ARN)
 
     class Meta:
         unique_together = [["audience", "property"]]

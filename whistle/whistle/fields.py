@@ -1,19 +1,29 @@
 import base64
 
-import boto3
-import redis
-from django.conf import settings
+import aws_encryption_sdk
 from django.core import checks
 from django.db import models
 
-from whistle import utils
+from whistle import settings
+
+kms_client = aws_encryption_sdk.EncryptionSDKClient()
+
+kms_cache = aws_encryption_sdk.LocalCryptoMaterialsCache(settings.KMS_CACHE_CAPACITY)
 
 
 class EncryptedField(models.CharField):
-    def __init__(self, key_id, cache_expiry=2592000, *args, **kwargs):
+    def __init__(self, key_id, cache_expiry=3600.0, *args, **kwargs):
         kwargs.setdefault("editable", True)
         self.key_id = key_id
+        self.kms_key_provider = aws_encryption_sdk.StrictAwsKmsMasterKeyProvider(
+            key_ids=[self.key_id]
+        )
         self.cache_expiry = cache_expiry
+        self.cache_cmm = aws_encryption_sdk.CachingCryptoMaterialsManager(
+            master_key_provider=self.kms_key_provider,
+            cache=kms_cache,
+            max_age=self.cache_expiry,
+        )
         super().__init__(*args, **kwargs)
 
     def deconstruct(self):
@@ -36,21 +46,14 @@ class EncryptedField(models.CharField):
             *extra_checks,
         ]
 
-    @property
-    def _kms_client(self):
-        return boto3.client("kms", region_name="us-east-1")
-
-    @property
-    def _redis_client(self):
-        return redis.from_url(settings.REDIS_CACHE_URL)
-
     def get_db_prep_value(self, value, connection, prepared=False):
         if isinstance(value, str) and value:
-            response = self._kms_client.encrypt(
-                KeyId=self.key_id, Plaintext=value.encode()
+            cipher_text, encryptor_header = kms_client.encrypt(
+                source=value.encode(),
+                materials_manager=self.cache_cmm,
             )
             return super().get_db_prep_value(
-                base64.b64encode(response["CiphertextBlob"]).decode(),
+                base64.b64encode(cipher_text).decode(),
                 connection,
                 prepared,
             )
@@ -58,19 +61,12 @@ class EncryptedField(models.CharField):
 
     def from_db_value(self, value, expression, connection):
         if value:
-            cipher_hash = utils.perform_hash(value)
-            cache = self._redis_client.get(f"whistle:{cipher_hash}")
-            if cache:
-                return cache.decode()
-            else:
-                response = self._kms_client.decrypt(
-                    CiphertextBlob=base64.b64decode(value.encode())
-                )
-                data = response["Plaintext"].decode()
-                self._redis_client.set(
-                    f"whistle:{cipher_hash}", data, ex=self.cache_expiry
-                )
-                return data
+            decrypted_plaintext, decryptor_header = kms_client.decrypt(
+                source=base64.b64decode(value.encode()),
+                materials_manager=self.cache_cmm,
+            )
+            data = decrypted_plaintext.decode()
+            return data
         return value
 
     def to_python(self, value):

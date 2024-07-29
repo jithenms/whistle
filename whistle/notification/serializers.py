@@ -110,16 +110,16 @@ class BroadcastRecipientSerializer(serializers.ModelSerializer):
 
 
 class BroadcastSerializer(serializers.ModelSerializer):
-    title = serializers.CharField(write_only=True)
-    content = serializers.CharField(write_only=True)
-    action_link = serializers.CharField(required=False, write_only=True)
-    audience_id = serializers.UUIDField(required=False, write_only=True)
+    title = serializers.CharField()
+    content = serializers.CharField()
+    action_link = serializers.CharField(required=False)
+    audience_id = serializers.UUIDField(required=False)
     recipients = BroadcastRecipientSerializer(many=True)
     channels = serializers.ListSerializer(
         child=serializers.CharField(), write_only=True
     )
     merge_tags = serializers.JSONField(required=False, write_only=True, default=dict)
-    providers = BroadcastProvidersSerializer(required=False)
+    providers = BroadcastProvidersSerializer(required=False, write_only=True)
 
     class Meta:
         model = Broadcast

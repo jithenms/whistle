@@ -1,10 +1,9 @@
 import logging
 import uuid
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 
 from asgiref.sync import async_to_sync
 from celery import chord
-from celery.schedules import schedule
 from channels.layers import get_channel_layer
 from django.conf import settings
 from django.db import transaction
@@ -56,43 +55,6 @@ basic_fields = {
     "first_name",
     "last_name",
 }
-
-
-@app.task
-@transaction.atomic
-def schedule_broadcast(broadcast_id, org_id, data):
-    broadcast = Broadcast.objects.get(pk=uuid.UUID(broadcast_id))
-    try:
-        data["id"] = str(data["id"])
-        schedule_at = data.get("schedule_at")
-        entry = RedBeatSchedulerEntry(app=app)
-        entry.name = broadcast_id
-        entry.task = "notification.tasks.send_broadcast"
-        entry.args = [broadcast_id, org_id, data]
-        entry.schedule = schedule(
-            max(schedule_at - datetime.now(tz=schedule_at.tzinfo), timedelta(0))
-        )
-        entry.save()
-        broadcast.schedule_at = schedule_at
-        broadcast.status = "scheduled"
-        broadcast.save()
-        logging.info(
-            "Broadcast scheduled at: %s with id: %s for org: %s",
-            schedule_at,
-            broadcast_id,
-            org_id,
-        )
-        return broadcast.id
-    except Exception as error:
-        broadcast.status = "failed"
-        broadcast.save()
-        logging.error(
-            "Failed to schedule broadcast: %s in org: %s with error: %s",
-            broadcast_id,
-            org_id,
-            error,
-        )
-        raise
 
 
 @app.task
@@ -162,7 +124,9 @@ def send_broadcast(broadcast_id, org_id, data):
                 recipient_ids.add(subscriber.id)
 
     if "schedule_at" in data:
-        entry = RedBeatSchedulerEntry.from_key(f"redbeat:{broadcast_id}", app=app)
+        entry = RedBeatSchedulerEntry.from_key(
+            f"whistle:schedule:broadcast:{broadcast_id}", app=app
+        )
         entry.delete()
 
     result = chord(tasks)(update_broadcast_status.s(broadcast_id, "processed"))

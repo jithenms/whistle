@@ -31,7 +31,12 @@ from twilio.base.exceptions import TwilioRestException
 from twilio.rest import Client
 
 from audience.models import Audience, OperatorChoices
-from connector.models import Twilio, Sendgrid, APNS, FCM
+from provider.models import (
+    Provider,
+    ProviderTypeChoices,
+    ProviderChoices,
+    ProviderCredential,
+)
 from external_user.models import ExternalUser, ExternalUserDevice, PlatformChoices
 from notification.models import (
     Notification,
@@ -54,30 +59,30 @@ basic_fields = {
 
 
 @app.task
+@transaction.atomic
 def schedule_broadcast(broadcast_id, org_id, data):
     broadcast = Broadcast.objects.get(pk=uuid.UUID(broadcast_id))
     try:
         data["id"] = str(data["id"])
         schedule_at = data.get("schedule_at")
-        with transaction.atomic():
-            entry = RedBeatSchedulerEntry(app=app)
-            entry.name = broadcast_id
-            entry.task = "notification.tasks.send_broadcast"
-            entry.args = [broadcast_id, org_id, data]
-            entry.schedule = schedule(
-                max(schedule_at - datetime.now(tz=schedule_at.tzinfo), timedelta(0))
-            )
-            entry.save()
-            broadcast.schedule_at = schedule_at
-            broadcast.status = "scheduled"
-            broadcast.save()
-            logging.info(
-                "Broadcast scheduled at: %s with id: %s for org: %s",
-                schedule_at,
-                broadcast_id,
-                org_id,
-            )
-            return broadcast.id
+        entry = RedBeatSchedulerEntry(app=app)
+        entry.name = broadcast_id
+        entry.task = "notification.tasks.send_broadcast"
+        entry.args = [broadcast_id, org_id, data]
+        entry.schedule = schedule(
+            max(schedule_at - datetime.now(tz=schedule_at.tzinfo), timedelta(0))
+        )
+        entry.save()
+        broadcast.schedule_at = schedule_at
+        broadcast.status = "scheduled"
+        broadcast.save()
+        logging.info(
+            "Broadcast scheduled at: %s with id: %s for org: %s",
+            schedule_at,
+            broadcast_id,
+            org_id,
+        )
+        return broadcast.id
     except Exception as error:
         broadcast.status = "failed"
         broadcast.save()
@@ -91,6 +96,7 @@ def schedule_broadcast(broadcast_id, org_id, data):
 
 
 @app.task
+@transaction.atomic
 def send_broadcast(broadcast_id, org_id, data):
     tasks = []
     recipient_ids = set()
@@ -170,7 +176,7 @@ def build_filter_kwargs(filters):
         filter_rec.property = filter_rec.property.replace(".", "__")
         if filter_rec.property in basic_fields:
             filter_rec.property = f"{filter_rec.property}_hash"
-            filter_rec.value = utils.hash_value(filter_rec.value)
+            filter_rec.value = utils.perform_hash(filter_rec.value)
         match filter_rec.operator:
             case OperatorChoices.EQ:
                 query_kwargs[filter_rec.property] = filter_rec.value
@@ -204,6 +210,7 @@ def build_exclude_kwargs(filters):
 
 
 @app.task
+@transaction.atomic
 def handle_recipient(broadcast_id, org_id, recipient_id, notification_id, data):
     recipient = ExternalUser.objects.get(pk=recipient_id)
 
@@ -233,6 +240,7 @@ def handle_recipient(broadcast_id, org_id, recipient_id, notification_id, data):
 
 
 @app.task
+@transaction.atomic
 def handle_topic_subscriber(broadcast_id, org_id, subscriber_id, notification_id, data):
     subscriber = ExternalUserSubscription.objects.get(pk=subscriber_id)
 
@@ -266,145 +274,45 @@ def handle_topic_subscriber(broadcast_id, org_id, subscriber_id, notification_id
 
 
 @app.task
+@transaction.atomic
 def send_sms(broadcast_id, org_id, user_id, notification_id, data):
-    try:
-        user = ExternalUser.objects.get(id=user_id)
-        twilio_connection = Twilio.objects.get(organization_id=org_id)
+    user = ExternalUser.objects.get(id=user_id)
+    providers = Provider.objects.filter(
+        organization_id=org_id, provider_type=ProviderTypeChoices.SMS
+    )
 
-        twilio_client = Client(
-            twilio_connection.account_sid, twilio_connection.auth_token
-        )
-        title = data["channels"]["sms"].get("title", data["title"])
-        content = data["channels"]["sms"].get("content", data["content"])
-
-        body = f"{title}\n{content}"
-
-        logging.info(body)
-
-        message = twilio_client.messages.create(
-            to=user.phone,
-            from_=twilio_connection.from_phone,
-            body=body,
-        )
-
-        logging.info(
-            "Sent Twilio sms to user: %s for broadcast: %s with status: %s",
-            user_id,
-            broadcast_id,
-            message.status,
-        )
-
-        if message.status in {"failed", "undelivered", "canceled"}:
-            status = "failed"
-            reason = f"{message.status}: {message.error_message}"
-        else:
-            status = "sent"
-            reason = None
-
-        persist_notification_delivery(
-            notification_id,
-            data["channels"]["sms"].get("title", data["title"]),
-            data["channels"]["sms"].get("content", data["content"]),
-            data["channels"]["sms"].get("action_link", data["content"]),
-            channel=ChannelChoices.SMS,
-            status=status,
-            error_reason=reason,
-            metadata={"twilio_message_sid": message.sid},
-        )
-
-        return message.sid
-    except TwilioRestException as error:
-        logging.error(
-            "Twilio failed to send text to user: %s for broadcast: %s with message: ",
-            user_id,
-            broadcast_id,
-            error.msg,
-        )
-        reason = f"{error.status}: {error.msg}"
-
-        persist_notification_delivery(
-            notification_id,
-            data["channels"]["sms"].get("title", data["title"]),
-            data["channels"]["sms"].get("content", data["content"]),
-            data["channels"]["sms"].get("action_link", data.get("action_link")),
-            channel=ChannelChoices.SMS,
-            status="failed",
-            error_reason=reason,
-        )
-
-        raise
+    for provider in providers.iterator():
+        match provider.provider:
+            case ProviderChoices.TWILIO.value:
+                handle_twilio(broadcast_id, data, notification_id, provider, user)
+            case _:
+                continue
+    return
 
 
 @app.task
+@transaction.atomic
 def send_email(broadcast_id, org_id, user_id, notification_id, data):
-    try:
-        user = ExternalUser.objects.get(id=user_id)
-        sendgrid_conn = Sendgrid.objects.get(organization_id=org_id)
-        sg = SendGridAPIClient(api_key=sendgrid_conn.api_key)
+    user = ExternalUser.objects.get(id=user_id)
+    providers = Provider.objects.filter(
+        organization_id=org_id, provider_type=ProviderTypeChoices.EMAIL
+    )
 
-        from_email = Email(sendgrid_conn.from_email)
-        to_email = To(user.email)
-
-        mail = Mail(from_email, to_email)
-
-        mail_settings = MailSettings()
-        mail_settings.sandbox_mode = SandBoxMode(settings.USE_SENDGRID_SANDBOX)
-        mail.mail_settings = mail_settings
-
-        if "sendgrid_template_id" in data["channels"]["email"]:
-            mail.dynamic_template_data = data["merge_tags"]
-            mail.template_id = data["channels"]["email"]["sendgrid_template_id"]
-        else:
-            mail.subject = data["channels"]["email"].get("title", data["title"])
-            mail.content = Content(
-                "text/plain", data["channels"]["email"].get("content", data["content"])
-            )
-        response = sg.send(mail)
-        logging.info(
-            "Sendgrid email with status code: %s sent to user: %s with broadcast: %s",
-            response.status_code,
-            user_id,
-            broadcast_id,
-        )
-
-        persist_notification_delivery(
-            notification_id,
-            data["channels"]["email"].get("title", data["title"]),
-            data["channels"]["email"].get("content", data["content"]),
-            data["channels"]["email"].get("action_link", data.get("action_link")),
-            channel=ChannelChoices.EMAIL,
-            status="sent",
-            sent_at=datetime.now(timezone.utc),
-            metadata={"sg_x_message_id": response.headers["X-Message-ID"]},
-        )
-
-        return response.headers["X-Message-ID"]
-    except HTTPError as error:
-        logging.error(
-            "Sendgrid failed to send email to user: %s for broadcast: %s with reason: ",
-            user_id,
-            broadcast_id,
-            error.reason,
-        )
-
-        persist_notification_delivery(
-            notification_id,
-            data["channels"]["email"].get("title", data["title"]),
-            data["channels"]["email"].get("content", data["content"]),
-            data["channels"]["email"].get("action_link", data["content"]),
-            channel=ChannelChoices.EMAIL,
-            status="failed",
-            reason=error.reason,
-        )
-
-        raise
+    for provider in providers.iterator():
+        match provider.provider:
+            case ProviderChoices.SENDGRID.value:
+                handle_sendgrid(broadcast_id, data, notification_id, provider, user)
+            case _:
+                continue
+    return
 
 
 @app.task
+@transaction.atomic
 def send_in_app(broadcast_id, org_id, user_id, notification_id, data):
-    title = data["channels"]["in_app"].get("title", data["title"])
-    content = data["channels"]["in_app"].get("content", data["content"])
-    action_link = data["channels"]["in_app"].get("action_link", data.get("action_link"))
+    title = data["title"]
+    content = data["content"]
+    action_link = data.get("action_link")
 
     notification = persist_notification_delivery(
         notification_id,
@@ -438,6 +346,7 @@ def send_in_app(broadcast_id, org_id, user_id, notification_id, data):
 
 
 @app.task
+@transaction.atomic
 def send_push(broadcast_id, org_id, user_id, notification_id, data):
     devices = ExternalUserDevice.objects.filter(user_id=user_id)
 
@@ -445,8 +354,10 @@ def send_push(broadcast_id, org_id, user_id, notification_id, data):
         logging.info("No devices for user: %s in broadcast: %s", user_id, broadcast_id)
         return
 
-    apns = APNS.objects.filter(organization_id=org_id)
-    fcm = FCM.objects.filter(organization_id=org_id)
+    apns = Provider.objects.filter(
+        organization_id=org_id, provider=ProviderChoices.APNS
+    )
+    fcm = Provider.objects.filter(organization_id=org_id, provider=ProviderChoices.FCM)
     for device in devices.iterator():
         match device.platform:
             case PlatformChoices.IOS:
@@ -456,78 +367,23 @@ def send_push(broadcast_id, org_id, user_id, notification_id, data):
                         user_id,
                         broadcast_id,
                     )
-                    continue
-                payload = IOSPayload(
-                    alert=IOSPayloadAlert(
-                        title=data["channels"]["push"].get("title", data["title"]),
-                        body=data["channels"]["push"].get("content", data["content"]),
-                    ),
-                    sound=data["channels"]["push"].get("sound", "default"),
-                    badge=data["channels"]["push"].get("badge", 1),
-                    category=data.get("category"),
-                )
-                notification = IOSNotification(
-                    payload=payload,
-                    topic=apns.first().bundle_id,
-                    apns_id=broadcast_id,
-                )
-                try:
-                    client = CustomAPNSClient(
-                        mode=(
-                            APNSClient.MODE_DEV
-                            if apns.first().use_sandbox
-                            else APNSClient.MODE_PROD
-                        ),
-                        root_cert_path=None,
-                        auth_key_path=apns.first().key_p8,
-                        auth_key_id=apns.first().key_id,
-                        team_id=apns.first().team_id,
-                    )
-                    res = client.push(
-                        notification=notification, device_token=device.token
-                    )
-
-                    logging.info(
-                        "Apple push notification sent for user: %s with response: %s",
-                        user_id,
-                        res,
-                    )
-
                     persist_notification_delivery(
                         notification_id,
-                        data["channels"]["push"].get("title", data["title"]),
-                        data["channels"]["push"].get("content", data["content"]),
-                        data["channels"]["push"].get(
-                            "action_link", data.get("action_link")
-                        ),
-                        channel=ChannelChoices.PUSH,
-                        status="sent",
-                        sent_at=datetime.now(timezone.utc),
-                        metadata={"platform": PlatformChoices.IOS.value},
-                    )
-
-                except APNSException as error:
-                    logging.info(
-                        "Failed to send Apple push notification sent for user: %s with status code: %s and apns_id: %s",
-                        user_id,
-                        error.status_code,
-                        error.apns_id,
-                    )
-
-                    persist_notification_delivery(
-                        notification_id,
-                        data["channels"]["push"].get("title", data["title"]),
-                        data["channels"]["push"].get("content", data["content"]),
-                        data["channels"]["push"].get(
-                            "action_link", data.get("action_link")
-                        ),
                         channel=ChannelChoices.PUSH,
                         status="failed",
-                        reason=f"APNS error with status code: {error.status_code} ",
-                        metadata={
-                            "platform": PlatformChoices.IOS.value,
-                            "apns_id": error.apns_id,
-                        },
+                        error_reason="APNS account not configured",
+                        metadata={"platform": PlatformChoices.IOS.value},
+                    )
+                    continue
+                if apns.first().enabled:
+                    handle_apns(
+                        apns, broadcast_id, data, device, notification_id, user_id
+                    )
+                else:
+                    logging.info(
+                        "APNS account not enabled for org: %s",
+                        user_id,
+                        org_id,
                     )
             case PlatformChoices.ANDROID:
                 if not fcm:
@@ -536,65 +392,28 @@ def send_push(broadcast_id, org_id, user_id, notification_id, data):
                         user_id,
                         broadcast_id,
                     )
-                    continue
-                notification = CustomFCMNotification(
-                    service_account_file=fcm.first().credentials,
-                    project_id=fcm.first().project_id,
-                )
-                try:
-                    res = notification.notify(
-                        fcm_token=device.token,
-                        notification_title=data["channels"]["push"].get(
-                            "title", data["title"]
-                        ),
-                        notification_body=data["channels"]["push"].get(
-                            "content", data["content"]
-                        ),
-                    )
-
-                    logging.info(
-                        "FCM notification sent for user: %s with response: %s",
-                        user_id,
-                        res,
-                    )
-
                     persist_notification_delivery(
                         notification_id,
-                        data["channels"]["push"].get("title", data["title"]),
-                        data["channels"]["push"].get("content", data["content"]),
-                        data["channels"]["push"].get(
-                            "action_link", data.get("action_link")
-                        ),
-                        channel=ChannelChoices.PUSH,
-                        status="sent",
-                        sent_at=datetime.now(timezone.utc),
-                        metadata={"platform": PlatformChoices.ANDROID.value},
-                    )
-
-                except FCMError as e:
-                    logging.info(
-                        "Firebase cloud messaging notification failed to send for user: %s with error: %s",
-                        user_id,
-                        e,
-                    )
-
-                    persist_notification_delivery(
-                        notification_id,
-                        data["channels"]["push"].get("title", data["title"]),
-                        data["channels"]["push"].get("content", data["content"]),
-                        data["channels"]["push"].get(
-                            "action_link", data.get("action_link")
-                        ),
                         channel=ChannelChoices.PUSH,
                         status="failed",
-                        error_reason=e,
+                        error_reason="FCM account not configured",
                         metadata={"platform": PlatformChoices.ANDROID.value},
+                    )
+                    continue
+                if fcm.first().enabled:
+                    handle_fcm(data, device, fcm, notification_id, user_id)
+                else:
+                    logging.info(
+                        "FCM account not enabled for org: %s",
+                        user_id,
+                        org_id,
                     )
             case _:
                 continue
 
 
 @app.task
+@transaction.atomic
 def update_broadcast_status(_, broadcast_id, status):
     broadcast = Broadcast.objects.get(pk=broadcast_id)
     broadcast.status = status
@@ -603,12 +422,278 @@ def update_broadcast_status(_, broadcast_id, status):
 
 
 @app.task
+@transaction.atomic
 def add_broadcast_recipient(_, broadcast_id, recipient_id):
     BroadcastRecipient.objects.create(
         broadcast_id=broadcast_id, recipient_id=recipient_id
     )
 
 
+@transaction.atomic
+def handle_apns(apns, broadcast_id, data, device, notification_id, user_id):
+    title = data.get("providers", {}).get("apns", {}).get("title") or data["title"]
+    body = data.get("providers", {}).get("apns", {}).get("body") or data["content"]
+    subtitle = data.get("providers", {}).get("apns", {}).get("subtitle")
+    payload = IOSPayload(
+        alert=IOSPayloadAlert(
+            title=title,
+            body=body,
+            subtitle=subtitle,
+        ),
+        sound=data.get("providers", {}).get("apns", {}).get("sound") or "default",
+        badge=data.get("providers", {}).get("apns", {}).get("badge") or 1,
+        category=data.get("category"),
+    )
+    bundle_id = ProviderCredential.objects.get(provider=apns, slug="bundle_id")
+    notification = IOSNotification(
+        payload=payload,
+        topic=bundle_id.value,
+        apns_id=broadcast_id,
+    )
+    use_sandbox = ProviderCredential.objects.get(provider=apns, slug="use_sandbox")
+    key_p8 = ProviderCredential.objects.get(provider=apns, slug="key_p8")
+    key_id = ProviderCredential.objects.get(provider=apns, slug="key_id")
+    team_id = ProviderCredential.objects.get(provider=apns, slug="team_id")
+    try:
+        client = CustomAPNSClient(
+            mode=(APNSClient.MODE_DEV if use_sandbox.value else APNSClient.MODE_PROD),
+            root_cert_path=None,
+            auth_key_path=key_p8.value,
+            auth_key_id=key_id.value,
+            team_id=team_id.value,
+        )
+        res = client.push(notification=notification, device_token=device.token)
+
+        logging.info(
+            "Apple push notification sent for user: %s with response: %s",
+            user_id,
+            res,
+        )
+
+        persist_notification_delivery(
+            notification_id,
+            title,
+            body,
+            data.get("action_link"),
+            channel=ChannelChoices.PUSH,
+            status="sent",
+            sent_at=datetime.now(timezone.utc),
+            metadata={"platform": PlatformChoices.IOS.value},
+        )
+
+    except APNSException as error:
+        logging.info(
+            "Failed to send Apple push notification sent for user: %s with status code: %s and apns_id: %s",
+            user_id,
+            error.status_code,
+            error.apns_id,
+        )
+
+        persist_notification_delivery(
+            notification_id,
+            title,
+            body,
+            data.get("action_link"),
+            channel=ChannelChoices.PUSH,
+            status="failed",
+            reason=f"APNS error with status code: {error.status_code} ",
+            metadata={
+                "platform": PlatformChoices.IOS.value,
+                "apns_id": error.apns_id,
+            },
+        )
+
+
+@transaction.atomic
+def handle_fcm(data, device, fcm, notification_id, user_id):
+    credentials = ProviderCredential.objects.get(provider=fcm, slug="credentials")
+    project_id = ProviderCredential.objects.get(provider=fcm, slug="project_id")
+    notification = CustomFCMNotification(
+        service_account_file=credentials.value,
+        project_id=project_id.value,
+    )
+    title = data.get("providers", {}).get("fcm", {}).get("title") or data["title"]
+    body = data.get("providers", {}).get("fcm", {}).get("body") or data["content"]
+    image = data.get("providers", {}).get("fcm", {}).get("image")
+    try:
+        res = notification.notify(
+            fcm_token=device.token,
+            notification_title=title,
+            notification_image=image,
+            notification_body=body,
+        )
+
+        logging.info(
+            "FCM notification sent for user: %s with response: %s",
+            user_id,
+            res,
+        )
+
+        persist_notification_delivery(
+            notification_id,
+            title,
+            body,
+            data["channels"]["push"].get(
+                "action_link",
+            ),
+            channel=ChannelChoices.PUSH,
+            status="sent",
+            sent_at=datetime.now(timezone.utc),
+            metadata={"platform": PlatformChoices.ANDROID.value},
+        )
+
+    except FCMError as e:
+        logging.info(
+            "Firebase cloud messaging notification failed to send for user: %s with error: %s",
+            user_id,
+            e,
+        )
+
+        persist_notification_delivery(
+            notification_id,
+            title,
+            body,
+            data.get("action_link"),
+            channel=ChannelChoices.PUSH,
+            status="failed",
+            error_reason=e,
+            metadata={"platform": PlatformChoices.ANDROID.value},
+        )
+
+
+@transaction.atomic
+def handle_twilio(broadcast_id, data, notification_id, provider, user):
+    from_phone = ProviderCredential.objects.get(provider=provider, slug="from_phone")
+    account_sid = ProviderCredential.objects.get(provider=provider, slug="account_sid")
+    auth_token = ProviderCredential.objects.get(provider=provider, slug="auth_token")
+    twilio_client = Client(account_sid.value, auth_token.value)
+    title = data.get("title")
+    content = data.get("content")
+    body = (
+        data.get("providers", {}).get("twilio", {}).get("body") or f"{title}\n{content}"
+    )
+    try:
+        message = twilio_client.messages.create(
+            to=user.phone,
+            from_=from_phone.value,
+            body=body,
+        )
+    except TwilioRestException as error:
+        logging.error(
+            "Twilio failed to send text to user: %s for broadcast: %s with message: ",
+            user.id,
+            broadcast_id,
+            error.msg,
+        )
+
+        reason = f"{error.status}: {error.msg}"
+        persist_notification_delivery(
+            notification_id,
+            None,
+            None,
+            data.get("action_link"),
+            channel=ChannelChoices.SMS,
+            status="failed",
+            error_reason=reason,
+        )
+        return
+    logging.info(
+        "Sent twilio sms to user: %s for broadcast: %s with status: %s",
+        user.id,
+        broadcast_id,
+        message.status,
+    )
+    if message.status in {"failed", "undelivered", "canceled"}:
+        status = "failed"
+        reason = f"{message.status}: {message.error_message}"
+    else:
+        status = "sent"
+        reason = None
+    # todo handle persisting overriden body
+    persist_notification_delivery(
+        notification_id,
+        title,
+        content,
+        data.get("action_link"),
+        channel=ChannelChoices.SMS,
+        status=status,
+        error_reason=reason,
+        metadata={"twilio_message_sid": message.sid},
+    )
+    return
+
+
+@transaction.atomic
+def handle_sendgrid(broadcast_id, data, notification_id, provider, user):
+    from_email_record = ProviderCredential.objects.get(
+        provider=provider, slug="from_email"
+    )
+    api_key = ProviderCredential.objects.get(provider=provider, slug="api_key")
+    sg = SendGridAPIClient(api_key=api_key.value)
+    from_email = Email(from_email_record.value)
+    to_email = To(user.email)
+    mail = Mail(from_email, to_email)
+    mail_settings = MailSettings()
+    mail_settings.sandbox_mode = SandBoxMode(settings.USE_SENDGRID_SANDBOX)
+    mail.mail_settings = mail_settings
+    if data.get("providers", {}).get("sendgrid", {}).get("sg_template_id"):
+        mail.dynamic_template_data = data.get("merge_tags")
+        mail.template_id = data["providers"]["sendgrid"]["sg_template_id"]
+    else:
+        mail.subject = (
+            data.get("providers", {}).get("sendgrid", {}).get("title") or data["title"]
+        )
+
+        mail.content = Content(
+            "text/plain",
+            (
+                data.get("providers", {}).get("sendgrid", {}).get("content")
+                or data["content"]
+            ),
+        )
+
+        try:
+            response = sg.send(mail)
+        except HTTPError as error:
+            logging.error(
+                "Sendgrid failed to send email to user: %s for broadcast: %s with reason: ",
+                user.id,
+                broadcast_id,
+                error.reason,
+            )
+
+            persist_notification_delivery(
+                notification_id,
+                None,
+                None,
+                data.get("action_link"),
+                channel=ChannelChoices.EMAIL,
+                status="failed",
+                reason=error.reason,
+            )
+            return
+
+        logging.info(
+            "Sendgrid email with status code: %s sent to user: %s with broadcast: %s",
+            response.status_code,
+            user.id,
+            broadcast_id,
+        )
+
+        persist_notification_delivery(
+            notification_id,
+            mail.subject,
+            mail.content,
+            data.get("action_link"),
+            channel=ChannelChoices.EMAIL,
+            status="sent",
+            sent_at=datetime.now(timezone.utc),
+            metadata={"sg_x_message_id": response.headers["X-Message-ID"]},
+        )
+    return
+
+
+@transaction.atomic
 def persist_notification(org_id, broadcast_id, recipient_id, **kwargs):
     notification = Notification.objects.create(
         organization_id=org_id,
@@ -625,8 +710,9 @@ def persist_notification(org_id, broadcast_id, recipient_id, **kwargs):
     return notification
 
 
+@transaction.atomic
 def persist_notification_delivery(
-    notification_id, title, content, action_link, **kwargs
+    notification_id, title=None, content=None, action_link=None, **kwargs
 ):
     notification_channel = NotificationDelivery.objects.create(
         notification_id=notification_id,
@@ -644,6 +730,7 @@ def persist_notification_delivery(
     return notification_channel
 
 
+@transaction.atomic
 def update_or_create_external_user(broadcast_id, org_id, recipient, data):
     if "external_id" in recipient:
         defaults = {}
@@ -680,7 +767,7 @@ def update_or_create_external_user(broadcast_id, org_id, recipient, data):
 
     elif "email" in recipient:
         try:
-            email_hash = utils.hash_value(recipient["email"])
+            email_hash = utils.perform_hash(recipient["email"])
             return ExternalUser.objects.get(
                 organization_id=org_id, email_hash=email_hash
             )
@@ -708,6 +795,7 @@ def update_or_create_external_user(broadcast_id, org_id, recipient, data):
             return None
 
 
+@transaction.atomic
 def route_notification_with_preference(
     broadcast_id, org_id, notification_id, recipient, channels, data
 ):
@@ -720,7 +808,7 @@ def route_notification_with_preference(
         broadcast_id,
     )
 
-    if data["channels"]["in_app"]["enabled"]:
+    if ChannelChoices.IN_APP.value in data["channels"]:
         web_preference_entity = channels.get(slug=ChannelChoices.IN_APP.value)
         if web_preference_entity.enabled:
             tasks.append(
@@ -736,15 +824,15 @@ def route_notification_with_preference(
             )
             persist_notification_delivery(
                 notification_id,
-                data["channels"]["in_app"].get("title", data["title"]),
-                data["channels"]["in_app"].get("content", data["content"]),
-                data["channels"]["in_app"].get("action_link", data.get("action_link")),
+                data["title"],
+                data["content"],
+                data.get("action_link"),
                 channel=ChannelChoices.IN_APP,
                 status="not_sent",
                 error_reason="User disabled",
             )
 
-    if data["channels"]["sms"]["enabled"]:
+    if ChannelChoices.SMS.value in data["channels"]:
         sms_preference_entity = channels.get(slug=ChannelChoices.SMS.value)
         if sms_preference_entity.enabled and recipient.phone:
             tasks.append(send_sms.s(broadcast_id, org_id, recipient.id, data))
@@ -757,9 +845,6 @@ def route_notification_with_preference(
             )
             persist_notification_delivery(
                 notification_id,
-                data["channels"]["sms"].get("title", data["title"]),
-                data["channels"]["sms"].get("content", data["content"]),
-                data["channels"]["sms"].get("action_link", data.get("action_link")),
                 channel=ChannelChoices.SMS,
                 status="failed",
                 error_reason="No phone provided for user",
@@ -774,15 +859,12 @@ def route_notification_with_preference(
             )
             persist_notification_delivery(
                 notification_id,
-                data["channels"]["sms"].get("title", data["title"]),
-                data["channels"]["sms"].get("content", data["content"]),
-                data["channels"]["sms"].get("action_link", data.get("action_link")),
                 channel=ChannelChoices.SMS,
                 status="not_sent",
                 error_reason="User disabled",
             )
 
-    if data["channels"]["email"]["enabled"]:
+    if ChannelChoices.EMAIL.value in data["channels"]:
         email_preference_entity = channels.get(slug=ChannelChoices.EMAIL.value)
         if email_preference_entity.enabled:
             tasks.append(
@@ -798,15 +880,12 @@ def route_notification_with_preference(
             )
             persist_notification_delivery(
                 notification_id,
-                data["channels"]["email"].get("title", data["title"]),
-                data["channels"]["email"].get("content", data["content"]),
-                data["channels"]["email"].get("action_link", data.get("action_link")),
                 channel=ChannelChoices.EMAIL,
                 status="not_sent",
                 error_reason="User disabled",
             )
 
-    if data["channels"]["push"]["enabled"]:
+    if ChannelChoices.PUSH.value in data["channels"]:
         mobile_preference_entity = channels.get(slug=ChannelChoices.PUSH.value)
         if mobile_preference_entity.enabled:
             tasks.append(
@@ -822,9 +901,6 @@ def route_notification_with_preference(
             )
             persist_notification_delivery(
                 notification_id,
-                data["channels"]["push"].get("title", data["title"]),
-                data["channels"]["push"].get("content", data["content"]),
-                data["channels"]["push"].get("action_link", data.get("action_link")),
                 channel=ChannelChoices.PUSH,
                 status="not_sent",
                 error_reason="User disabled",
@@ -835,6 +911,7 @@ def route_notification_with_preference(
     return result.id
 
 
+@transaction.atomic
 def route_basic_notification(broadcast_id, org_id, notification_id, recipient, data):
     tasks = []
 
@@ -845,18 +922,16 @@ def route_basic_notification(broadcast_id, org_id, notification_id, recipient, d
         broadcast_id,
     )
 
-    logging.info(data["channels"])
-
-    if data["channels"]["in_app"]["enabled"]:
+    if ChannelChoices.IN_APP.value in data["channels"]:
         tasks.append(
             send_in_app.s(broadcast_id, org_id, recipient.id, notification_id, data)
         )
 
-    if data["channels"]["sms"]["enabled"] and recipient.phone:
+    if ChannelChoices.SMS.value in data["channels"]:
         tasks.append(
             send_sms.s(broadcast_id, org_id, recipient.id, notification_id, data)
         )
-    elif data["channels"]["sms"]["enabled"] and not recipient.phone:
+    elif ChannelChoices.SMS.value in data["channels"] and not recipient.phone:
         logging.warning(
             "Trying to route SMS notification without phone on record for user: %s in org: %s for broadcast: %s",
             recipient.id,
@@ -865,18 +940,15 @@ def route_basic_notification(broadcast_id, org_id, notification_id, recipient, d
         )
         persist_notification_delivery(
             notification_id,
-            data["channels"]["sms"].get("title", data["title"]),
-            data["channels"]["sms"].get("content", data["content"]),
-            data["channels"]["sms"].get("action_link", data.get("action_link")),
             channel=ChannelChoices.SMS,
             status="failed",
             error_reason="No phone provided for user",
         )
-    if data["channels"]["email"]["enabled"]:
+    if ChannelChoices.EMAIL.value in data["channels"]:
         tasks.append(
             send_email.s(broadcast_id, org_id, recipient.id, notification_id, data)
         )
-    if data["channels"]["push"]["enabled"]:
+    if ChannelChoices.PUSH.value in data["channels"]:
         tasks.append(
             send_push.s(broadcast_id, org_id, recipient.id, notification_id, data)
         )

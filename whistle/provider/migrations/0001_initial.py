@@ -2,6 +2,7 @@
 
 import django.db.models.deletion
 import uuid
+import whistle.fields
 from django.db import migrations, models
 
 
@@ -10,13 +11,54 @@ class Migration(migrations.Migration):
     initial = True
 
     dependencies = [
-        ("external_user", "0001_initial"),
         ("organization", "0001_initial"),
     ]
 
     operations = [
         migrations.CreateModel(
-            name="ExternalUserPreference",
+            name="Provider",
+            fields=[
+                (
+                    "id",
+                    models.UUIDField(
+                        default=uuid.uuid4,
+                        editable=False,
+                        primary_key=True,
+                        serialize=False,
+                    ),
+                ),
+                (
+                    "provider_type",
+                    models.CharField(
+                        choices=[("SMS", "SMS"), ("EMAIL", "EMAIL"), ("PUSH", "PUSH")]
+                    ),
+                ),
+                (
+                    "provider",
+                    models.CharField(
+                        choices=[
+                            ("TWILIO", "TWILIO"),
+                            ("SENDGRID", "SENDGRID"),
+                            ("APNS", "APNS"),
+                            ("FCM", "FCM"),
+                        ]
+                    ),
+                ),
+                ("enabled", models.BooleanField(default=True)),
+                (
+                    "organization",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        to="organization.organization",
+                    ),
+                ),
+            ],
+            options={
+                "unique_together": {("organization", "provider")},
+            },
+        ),
+        migrations.CreateModel(
+            name="ProviderCredential",
             fields=[
                 (
                     "id",
@@ -28,57 +70,18 @@ class Migration(migrations.Migration):
                     ),
                 ),
                 ("slug", models.SlugField()),
+                ("value", whistle.fields.EncryptedField(key_id="alias/APICredentials")),
                 (
-                    "organization",
+                    "provider",
                     models.ForeignKey(
                         on_delete=django.db.models.deletion.CASCADE,
-                        to="organization.organization",
-                    ),
-                ),
-                (
-                    "user",
-                    models.ForeignKey(
-                        on_delete=django.db.models.deletion.CASCADE,
-                        to="external_user.externaluser",
+                        related_name="credentials",
+                        to="provider.provider",
                     ),
                 ),
             ],
             options={
-                "unique_together": {("organization", "slug")},
+                "unique_together": {("provider", "slug")},
             },
-        ),
-        migrations.CreateModel(
-            name="ExternalUserPreferenceChannel",
-            fields=[
-                (
-                    "id",
-                    models.UUIDField(
-                        default=uuid.uuid4,
-                        editable=False,
-                        primary_key=True,
-                        serialize=False,
-                    ),
-                ),
-                (
-                    "slug",
-                    models.SlugField(
-                        choices=[
-                            ("IN_APP", "IN_APP"),
-                            ("EMAIL", "EMAIL"),
-                            ("SMS", "SMS"),
-                            ("PUSH", "PUSH"),
-                        ]
-                    ),
-                ),
-                ("enabled", models.BooleanField(default=False)),
-                (
-                    "user_preference",
-                    models.ForeignKey(
-                        on_delete=django.db.models.deletion.CASCADE,
-                        related_name="channels",
-                        to="preference.externaluserpreference",
-                    ),
-                ),
-            ],
         ),
     ]

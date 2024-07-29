@@ -1,9 +1,6 @@
-import logging
-
 from rest_framework import serializers
 
 from audience.models import Audience
-from connector.models import Sendgrid, Twilio, FCM, APNS
 from external_user.models import ExternalUser
 from external_user.serializers import ExternalUserSerializer
 from notification.models import (
@@ -11,33 +8,7 @@ from notification.models import (
     Broadcast,
     NotificationDelivery,
 )
-
-
-class InAppSerializer(serializers.Serializer):
-    title = serializers.CharField(required=False)
-    content = serializers.CharField(required=False)
-    enabled = serializers.BooleanField(default=False)
-
-
-class EmailSerializer(serializers.Serializer):
-    title = serializers.CharField(required=False)
-    content = serializers.CharField(required=False)
-    sendgrid_template_id = serializers.CharField(required=False)
-    enabled = serializers.BooleanField(default=False)
-
-
-class SMSSerializer(serializers.Serializer):
-    title = serializers.CharField(required=False)
-    content = serializers.CharField(required=False)
-    enabled = serializers.BooleanField(default=False)
-
-
-class PushSerializer(serializers.Serializer):
-    title = serializers.CharField(required=False)
-    content = serializers.CharField(required=False)
-    badge = serializers.CharField(required=False)
-    sound = serializers.CharField(required=False)
-    enabled = serializers.BooleanField(default=False)
+from preference.models import ChannelChoices
 
 
 class NotificationDeliverySerializer(serializers.ModelSerializer):
@@ -84,11 +55,34 @@ class NotificationSerializer(serializers.ModelSerializer):
         read_only_fields = ("broadcast", "recipient", "deliveries")
 
 
-class BroadcastChannelSerializer(serializers.Serializer):
-    in_app = InAppSerializer(required=False, default=InAppSerializer().data)
-    email = EmailSerializer(required=False, default=EmailSerializer().data)
-    sms = SMSSerializer(required=False, default=SMSSerializer().data)
-    push = PushSerializer(required=False, default=PushSerializer().data)
+class APNSProviderSerializer(serializers.Serializer):
+    title = serializers.CharField(required=False)
+    subtitle = serializers.CharField(required=False)
+    body = serializers.CharField(required=False)
+    badge = serializers.IntegerField(required=False)
+    sound = serializers.CharField(required=False)
+
+
+class FCMProviderSerializer(serializers.Serializer):
+    title = serializers.CharField(required=False)
+    body = serializers.CharField(required=False)
+
+
+class SendgridProviderSerializer(serializers.Serializer):
+    sg_template_id = serializers.CharField(required=False)
+    subject = serializers.CharField(required=False)
+    content = serializers.CharField(required=False)
+
+
+class TwilioProviderSerializer(serializers.Serializer):
+    body = serializers.CharField(required=False)
+
+
+class BroadcastProvidersSerializer(serializers.Serializer):
+    twilio = TwilioProviderSerializer(required=False)
+    sendgrid = SendgridProviderSerializer(required=False)
+    apns = APNSProviderSerializer(required=False)
+    fcm = FCMProviderSerializer(required=False)
 
 
 class BroadcastRecipientSerializer(serializers.ModelSerializer):
@@ -121,8 +115,11 @@ class BroadcastSerializer(serializers.ModelSerializer):
     action_link = serializers.CharField(required=False, write_only=True)
     audience_id = serializers.UUIDField(required=False, write_only=True)
     recipients = BroadcastRecipientSerializer(many=True)
-    channels = BroadcastChannelSerializer(write_only=True)
+    channels = serializers.ListSerializer(
+        child=serializers.CharField(), write_only=True
+    )
     merge_tags = serializers.JSONField(required=False, write_only=True, default=dict)
+    providers = BroadcastProvidersSerializer(required=False)
 
     class Meta:
         model = Broadcast
@@ -136,6 +133,7 @@ class BroadcastSerializer(serializers.ModelSerializer):
             "title",
             "content",
             "action_link",
+            "providers",
             "recipients",
             "merge_tags",
             "metadata",
@@ -143,6 +141,23 @@ class BroadcastSerializer(serializers.ModelSerializer):
             "status",
         ]
         read_only_fields = ("status", "metadata")
+
+    def validate_channels(self, channels):
+        if not channels:
+            raise serializers.ValidationError(
+                "The 'channels' field is empty. Please provide at least one delivery channel.",
+                "channels_not_provided",
+            )
+
+        values = []
+        for value in channels:
+            value_upper = value.upper()
+            if value_upper not in ChannelChoices.values:
+                raise serializers.ValidationError(
+                    f"'{value}' is not a valid 'slug'.", "invalid_slug"
+                )
+            values.append(value_upper)
+        return values
 
     def validate(self, data):
         if not data.get("recipients", []) and "audience_id" not in data:
@@ -158,52 +173,10 @@ class BroadcastSerializer(serializers.ModelSerializer):
                     pk=data["audience_id"],
                 )
             except Audience.DoesNotExist:
-                logging.error(
-                    "Invalid audience id: %s provided for org: %s",
-                    data["audience_id"],
-                    self.context["request"].user.id,
-                )
                 raise serializers.ValidationError(
                     "Audience not found. Please provide a valid Audience ID.",
                     "invalid_audience_id",
                 )
-
-        if data["channels"]["email"]["enabled"]:
-            sendgrid = Sendgrid.objects.filter(
-                organization=self.context["request"].user
-            )
-            if not sendgrid:
-                raise serializers.ValidationError(
-                    "Sendgrid account not configured. Please configure a Sendgrid account to send emails.",
-                    "sendgrid_account_not_configured",
-                )
-
-        if data["channels"]["sms"]["enabled"]:
-            twilio = Twilio.objects.filter(organization=self.context["request"].user)
-            if not twilio:
-                raise serializers.ValidationError(
-                    "Twilio account not configured. Please configure a Twilio account to send texts.",
-                    "twilio_account_not_configured",
-                )
-
-        if data["channels"]["push"]["enabled"]:
-            fcm = FCM.objects.filter(organization=self.context["request"].user)
-            apns = APNS.objects.filter(organization=self.context["request"].user)
-
-            if not fcm and not apns:
-                raise serializers.ValidationError(
-                    "FCM and APNS are not configured. Please configure at least one to send mobile notifications.",
-                    "fcm_and_apns_not_configured",
-                )
-
-        if data["merge_tags"] and "email" not in data.get("channels", {}):
-            raise serializers.ValidationError(
-                {
-                    "merge_tags": "The 'merge_tags' field requires 'channels.email.sendgrid_template_id' to be "
-                    "specified."
-                },
-                "sendgrid_template_id_unspecified",
-            )
 
         return super().validate(data)
 

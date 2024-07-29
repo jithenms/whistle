@@ -49,9 +49,9 @@ class NotificationDelivery(models.Model):
         Notification, on_delete=models.PROTECT, related_name="deliveries"
     )
     channel = models.CharField(choices=ChannelChoices.choices)
-    title = models.CharField()
-    content = models.CharField()
-    action_link = models.CharField()
+    title = models.CharField(null=True, blank=True)
+    content = models.CharField(null=True, blank=True)
+    action_link = models.CharField(null=True, blank=True)
     status = models.CharField()
     error_reason = models.CharField(null=True, blank=True)
     metadata = models.JSONField(null=True, blank=True)

@@ -41,7 +41,6 @@ if ENVIRONMENT and SENTRY_DSN:
     )
 
 INSTALLED_APPS = [
-    "connector",
     "notification",
     "external_user",
     "preference",
@@ -50,6 +49,7 @@ INSTALLED_APPS = [
     "user",
     "realtime",
     "audience",
+    "provider",
     "daphne",
     "django.contrib.admin",
     "django.contrib.auth",
@@ -94,7 +94,7 @@ SPECTACULAR_SETTINGS = {
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
     "COMPONENT_SPLIT_REQUEST": True,
-    'PREPROCESSING_HOOKS': ["whistle.extensions.preprocess_endpoints"]
+    "PREPROCESSING_HOOKS": ["whistle.extensions.preprocess_endpoints"],
 }
 
 ROOT_URLCONF = "whistle.urls"

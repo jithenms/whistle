@@ -28,7 +28,7 @@ class ClientAuthMiddleware:
         ):
             api_key = headers[b"sec-websocket-protocol"].decode()
             scope["api_key"] = api_key
-            api_key_hash = utils.hash_value(api_key)
+            api_key_hash = utils.perform_hash(api_key)
             credentials = await get_organization_credentials(api_key_hash=api_key_hash)
             if credentials:
                 external_id = params[b"external_id"][0].decode()

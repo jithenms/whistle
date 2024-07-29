@@ -11,7 +11,7 @@ from whistle.auth import ClientAuth, IsValidExternalId
 from whistle.pagination import StandardLimitOffsetPagination
 
 
-class ExternalUserSubscriptionViewSet(ModelViewSet):
+class SubscriptionViewSet(ModelViewSet):
     queryset = ExternalUserSubscription.objects.all()
     serializer_class = ExternalUserSubscriptionSerializer
     authentication_classes = [ClientAuth]

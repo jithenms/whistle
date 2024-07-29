@@ -1,6 +1,6 @@
 from django.apps import AppConfig
 
 
-class ConnectorsConfig(AppConfig):
+class ProvidersConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
-    name = "connector"
+    name = "provider"

@@ -73,11 +73,11 @@ class ServerAuth(BaseAuthentication):
                 )
             else:
                 try:
-                    api_key_hash = utils.hash_value(api_key)
+                    api_key_hash = utils.perform_hash(api_key)
                     credentials = OrganizationCredentials.objects.select_related(
                         "organization"
                     ).get(api_key_hash=api_key_hash)
-                    api_secret_hash = utils.hash_value(
+                    api_secret_hash = utils.perform_hash(
                         api_secret, credentials.api_secret_salt
                     )
                     if api_secret_hash != credentials.api_secret_hash:
@@ -133,7 +133,7 @@ class ClientAuth(BaseAuthentication):
                 )
         else:
             api_key = request.headers.get("X-API-Key")
-            api_key_hash = utils.hash_value(api_key)
+            api_key_hash = utils.perform_hash(api_key)
             try:
                 credentials = OrganizationCredentials.objects.select_related(
                     "organization"
@@ -193,28 +193,28 @@ def update_or_create_user(data):
     return user
 
 
+@transaction.atomic
 def update_or_create_organization(data):
-    with transaction.atomic():
-        org, org_created = Organization.objects.update_or_create(
-            clerk_org_id=data["org_id"],
-            defaults={"slug": data["org_slug"], "name": data["org_name"]},
+    org, org_created = Organization.objects.update_or_create(
+        clerk_org_id=data["org_id"],
+        defaults={"slug": data["org_slug"], "name": data["org_name"]},
+    )
+    if org_created:
+        (
+            api_key,
+            api_secret,
+            api_secret_salt,
+        ) = generate_api_credentials()
+
+        OrganizationCredentials.objects.create(
+            organization=org,
+            api_key=api_key,
+            api_secret=api_secret,
+            api_secret_salt=api_secret_salt,
         )
-        if org_created:
-            (
-                api_key,
-                api_secret,
-                api_secret_salt,
-            ) = generate_api_credentials()
 
-            OrganizationCredentials.objects.create(
-                organization=org,
-                api_key=api_key,
-                api_secret=api_secret,
-                api_secret_salt=api_secret_salt,
-            )
-
-            logging.info("New organization with clerk id: %s synced.", data["org_id"])
-        return org
+        logging.info("New organization with clerk id: %s synced.", data["org_id"])
+    return org
 
 
 def update_or_create_organization_member(data, user, org):

@@ -52,31 +52,17 @@ class NotificationDeliverySerializer(serializers.ModelSerializer):
             "error_reason",
             "metadata",
             "sent_at",
-            "seen_at",
-            "read_at",
-            "clicked_at",
-            "archived_at",
         ]
         read_only_fields = (
-            "sent_at",
-            "channel",
-            "status",
-            "error_reason",
-        )
-
-    def update(self, instance, validated_data):
-        for field in [
-            "channel",
-            "external_id",
             "title",
             "content",
             "action_link",
+            "channel",
             "status",
             "error_reason",
-        ]:
-            if field in validated_data:
-                validated_data.pop(field)
-        return super().update(instance, validated_data)
+            "metadata",
+            "sent_at",
+        )
 
 
 class NotificationSerializer(serializers.ModelSerializer):
@@ -85,7 +71,16 @@ class NotificationSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Notification
-        fields = ["id", "broadcast_id", "recipient", "deliveries"]
+        fields = [
+            "id",
+            "broadcast_id",
+            "recipient",
+            "deliveries",
+            "seen_at",
+            "read_at",
+            "clicked_at",
+            "archived_at",
+        ]
         read_only_fields = ("broadcast_id", "recipient_id", "deliveries")
 
 

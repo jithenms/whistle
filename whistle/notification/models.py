@@ -37,6 +37,10 @@ class Notification(models.Model):
     organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
     broadcast = models.ForeignKey(Broadcast, on_delete=models.PROTECT)
     recipient = models.ForeignKey(ExternalUser, on_delete=models.PROTECT)
+    clicked_at = models.DateTimeField(null=True)
+    seen_at = models.DateTimeField(null=True)
+    read_at = models.DateTimeField(null=True)
+    archived_at = models.DateTimeField(null=True)
 
 
 class NotificationDelivery(models.Model):
@@ -52,7 +56,3 @@ class NotificationDelivery(models.Model):
     error_reason = models.CharField(null=True, blank=True)
     metadata = models.JSONField(null=True, blank=True)
     sent_at = models.DateTimeField(null=True)
-    clicked_at = models.DateTimeField(null=True)
-    seen_at = models.DateTimeField(null=True)
-    read_at = models.DateTimeField(null=True)
-    archived_at = models.DateTimeField(null=True)

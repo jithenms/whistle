@@ -7,7 +7,7 @@ from audience.models import Audience, Filter, OperatorChoices
 
 
 class FilterSerializer(serializers.ModelSerializer):
-    operator = serializers.CharField(max_length=255)
+    operator = serializers.CharField()
 
     class Meta:
         model = Filter
@@ -37,8 +37,8 @@ class AudienceSerializer(serializers.ModelSerializer):
             with transaction.atomic():
                 instance = Audience(
                     organization=org,
-                    name=validated_data.get("name", ""),
-                    description=validated_data.get("description", ""),
+                    name=validated_data.get("name"),
+                    description=validated_data.get("description"),
                 )
                 instance.save()
                 for _filter in validated_data["filters"]:

@@ -33,7 +33,7 @@ from twilio.rest import Client
 from audience.models import Audience, OperatorChoices
 from connector.models import Twilio, Sendgrid, APNS, FCM
 from external_user.models import ExternalUser, ExternalUserDevice, PlatformChoices
-from notification.models import Notification, Broadcast
+from notification.models import Notification, Broadcast, BroadcastRecipient
 from preference.models import ExternalUserPreference, ChannelChoices
 from subscription.models import ExternalUserSubscription
 from whistle import utils
@@ -63,7 +63,7 @@ def schedule_broadcast(broadcast_id, org_id, data):
                 max(schedule_at - datetime.now(tz=schedule_at.tzinfo), timedelta(0))
             )
             entry.save()
-            broadcast.scheduled_at = schedule_at
+            broadcast.schedule_at = schedule_at
             broadcast.status = "scheduled"
             broadcast.save()
             logging.info(
@@ -271,7 +271,7 @@ def send_sms(broadcast_id, org_id, user_id, data):
             reason = f"{message.status}: {message.error_message}"
         else:
             status = "sent"
-            reason = ""
+            reason = None
 
         persist_notification(
             broadcast_id,
@@ -592,6 +592,13 @@ def update_broadcast_status(_, broadcast_id, status):
     return broadcast_id
 
 
+@app.task
+def add_broadcast_recipient(_, broadcast_id, recipient_id):
+    BroadcastRecipient.objects.create(
+        broadcast_id=broadcast_id, recipient_id=recipient_id
+    )
+
+
 def persist_notification(
     broadcast_id, org_id, user_id, title, content, action_link, **kwargs
 ):
@@ -652,8 +659,9 @@ def update_or_create_external_user(broadcast_id, org_id, recipient, data):
 
     elif "email" in recipient:
         try:
+            email_hash = utils.hash_value(recipient["email"])
             return ExternalUser.objects.get(
-                organization_id=org_id, email=recipient["email"]
+                organization_id=org_id, email_hash=email_hash
             )
         except ExternalUser.DoesNotExist:
             logging.debug(
@@ -680,6 +688,8 @@ def update_or_create_external_user(broadcast_id, org_id, recipient, data):
 
 
 def route_notification_with_preference(broadcast_id, org_id, recipient, channels, data):
+    tasks = []
+
     logging.info(
         "Routing notification with preference for user: %s in org: %s for broadcast: %s",
         recipient.id,
@@ -690,7 +700,7 @@ def route_notification_with_preference(broadcast_id, org_id, recipient, channels
     if data["channels"]["in_app"]["enabled"]:
         web_preference_entity = channels.get(slug=ChannelChoices.IN_APP.value)
         if web_preference_entity.enabled:
-            send_in_app.delay(broadcast_id, org_id, recipient.id, data)
+            tasks.append(send_in_app.s(broadcast_id, org_id, recipient.id, data))
         else:
             logging.info(
                 "In app disabled for category %s for user: %s in org: %s for broadcast: %s",
@@ -714,7 +724,7 @@ def route_notification_with_preference(broadcast_id, org_id, recipient, channels
     if data["channels"]["sms"]["enabled"]:
         sms_preference_entity = channels.get(slug=ChannelChoices.SMS.value)
         if sms_preference_entity.enabled and recipient.phone:
-            send_sms.delay(broadcast_id, org_id, recipient.id, data)
+            tasks.append(send_sms.s(broadcast_id, org_id, recipient.id, data))
         elif sms_preference_entity.enabled and not recipient.phone:
             logging.warning(
                 "Trying to route SMS notification without phone on record for user: %s in org: %s for broadcast: %s",
@@ -756,7 +766,7 @@ def route_notification_with_preference(broadcast_id, org_id, recipient, channels
     if data["channels"]["email"]["enabled"]:
         email_preference_entity = channels.get(slug=ChannelChoices.EMAIL.value)
         if email_preference_entity.enabled:
-            send_email.delay(broadcast_id, org_id, recipient.id, data)
+            tasks.append(send_email.s(broadcast_id, org_id, recipient.id, data))
         else:
             logging.info(
                 "Email disabled for category: %s for user: %s in org: %s for broadcast: %s",
@@ -780,7 +790,7 @@ def route_notification_with_preference(broadcast_id, org_id, recipient, channels
     if data["channels"]["push"]["enabled"]:
         mobile_preference_entity = channels.get(slug=ChannelChoices.PUSH.value)
         if mobile_preference_entity.enabled:
-            send_push.delay(broadcast_id, org_id, recipient.id, data)
+            tasks.append(send_push.s(broadcast_id, org_id, recipient.id, data))
         else:
             logging.info(
                 "Mobile push disabled for category: %s for user: %s in org: %s for broadcast: %s",
@@ -801,8 +811,14 @@ def route_notification_with_preference(broadcast_id, org_id, recipient, channels
                 error_reason="User disabled",
             )
 
+    result = chord(tasks)(add_broadcast_recipient.s(broadcast_id, recipient.id))
+
+    return result.id
+
 
 def route_basic_notification(broadcast_id, org_id, recipient, data):
+    tasks = []
+
     logging.info(
         "Routing basic notification for user: %s in org: %s for broadcast: %s",
         recipient.id,
@@ -813,10 +829,10 @@ def route_basic_notification(broadcast_id, org_id, recipient, data):
     logging.info(data["channels"])
 
     if data["channels"]["in_app"]["enabled"]:
-        send_in_app.delay(broadcast_id, org_id, recipient.id, data)
+        tasks.append(send_in_app.s(broadcast_id, org_id, recipient.id, data))
 
     if data["channels"]["sms"]["enabled"] and recipient.phone:
-        send_sms.delay(broadcast_id, org_id, recipient.id, data)
+        tasks.append(send_sms.s(broadcast_id, org_id, recipient.id, data))
     elif data["channels"]["sms"]["enabled"] and not recipient.phone:
         logging.warning(
             "Trying to route SMS notification without phone on record for user: %s in org: %s for broadcast: %s",
@@ -836,6 +852,10 @@ def route_basic_notification(broadcast_id, org_id, recipient, data):
             error_reason="No phone provided for user",
         )
     if data["channels"]["email"]["enabled"]:
-        send_email.delay(broadcast_id, org_id, recipient.id, data)
+        tasks.append(send_email.s(broadcast_id, org_id, recipient.id, data))
     if data["channels"]["push"]["enabled"]:
-        send_push.delay(broadcast_id, org_id, recipient.id, data)
+        tasks.append(send_push.s(broadcast_id, org_id, recipient.id, data))
+
+    result = chord(tasks)(add_broadcast_recipient.s(broadcast_id, recipient.id))
+
+    return result.id

@@ -4,6 +4,8 @@ from rest_framework import serializers
 
 from audience.models import Audience
 from connector.models import Sendgrid, Twilio, FCM, APNS
+from external_user.models import ExternalUser
+from external_user.serializers import ExternalUserSerializer
 from notification.models import (
     Notification,
     Broadcast,
@@ -11,30 +13,30 @@ from notification.models import (
 
 
 class InAppSerializer(serializers.Serializer):
-    title = serializers.CharField(max_length=255, required=False)
-    content = serializers.CharField(max_length=255, required=False)
-    enabled = serializers.BooleanField()
+    title = serializers.CharField(required=False)
+    content = serializers.CharField(required=False)
+    enabled = serializers.BooleanField(default=False)
 
 
 class EmailSerializer(serializers.Serializer):
-    title = serializers.CharField(max_length=255, required=False)
-    content = serializers.CharField(max_length=255, required=False)
-    sendgrid_template_id = serializers.CharField(max_length=255, required=False)
-    enabled = serializers.BooleanField()
+    title = serializers.CharField(required=False)
+    content = serializers.CharField(required=False)
+    sendgrid_template_id = serializers.CharField(required=False)
+    enabled = serializers.BooleanField(default=False)
 
 
 class SMSSerializer(serializers.Serializer):
-    title = serializers.CharField(max_length=255, required=False)
-    content = serializers.CharField(max_length=255, required=False)
-    enabled = serializers.BooleanField()
+    title = serializers.CharField(required=False)
+    content = serializers.CharField(required=False)
+    enabled = serializers.BooleanField(default=False)
 
 
 class PushSerializer(serializers.Serializer):
-    title = serializers.CharField(max_length=255, required=False)
-    content = serializers.CharField(max_length=255, required=False)
-    badge = serializers.CharField(max_length=255, required=False)
-    sound = serializers.CharField(max_length=255, required=False)
-    enabled = serializers.BooleanField()
+    title = serializers.CharField(required=False)
+    content = serializers.CharField(required=False)
+    badge = serializers.CharField(required=False)
+    sound = serializers.CharField(required=False)
+    enabled = serializers.BooleanField(default=False)
 
 
 class NotificationSerializer(serializers.ModelSerializer):
@@ -57,7 +59,14 @@ class NotificationSerializer(serializers.ModelSerializer):
             "clicked_at",
             "archived_at",
         ]
-        read_only_fields = ("broadcast_id", "recipient_id", "sent_at", "channel", "status", "error_reason")
+        read_only_fields = (
+            "broadcast_id",
+            "recipient_id",
+            "sent_at",
+            "channel",
+            "status",
+            "error_reason",
+        )
 
     def update(self, instance, validated_data):
         for field in [
@@ -81,14 +90,12 @@ class BroadcastChannelSerializer(serializers.Serializer):
     push = PushSerializer(required=False, default=PushSerializer().data)
 
 
-class BroadcastRecipientSerializer(serializers.Serializer):
-    external_id = serializers.CharField(max_length=255, required=False)
-    first_name = serializers.CharField(max_length=255, required=False)
-    last_name = serializers.CharField(max_length=255, required=False)
-    email = serializers.CharField(max_length=255, required=False)
-    phone = serializers.CharField(max_length=255, required=False)
+class BroadcastRecipientSerializer(serializers.ModelSerializer):
+    external_id = serializers.CharField(required=False)
+    email = serializers.CharField(required=False)
 
     class Meta:
+        model = ExternalUser
         fields = [
             "external_id",
             "first_name",
@@ -104,38 +111,37 @@ class BroadcastRecipientSerializer(serializers.Serializer):
                 "'external_id' for this recipient.",
                 "email_or_external_id_not_provided",
             )
+        return data
 
 
 class BroadcastSerializer(serializers.ModelSerializer):
-    recipients = BroadcastRecipientSerializer(many=True, required=False, default=list)
-    schedule_at = serializers.DateTimeField(required=False)
+    title = serializers.CharField(write_only=True)
+    content = serializers.CharField(write_only=True)
+    action_link = serializers.CharField(required=False, write_only=True)
     audience_id = serializers.UUIDField(required=False, write_only=True)
-    channels = BroadcastChannelSerializer(
-        required=False, default=BroadcastChannelSerializer().data
-    )
-    additional_info = serializers.JSONField(required=False, default=dict)
+    recipients = BroadcastRecipientSerializer(many=True)
+    channels = BroadcastChannelSerializer(write_only=True)
     merge_tags = serializers.JSONField(required=False, write_only=True, default=dict)
-    metadata = serializers.JSONField(read_only=True, default=dict)
 
     class Meta:
         model = Broadcast
         fields = [
             "id",
-            "recipients",
             "schedule_at",
             "audience_id",
-            "merge_tags",
             "category",
             "topic",
             "channels",
             "title",
             "content",
             "action_link",
-            "additional_info",
+            "recipients",
+            "merge_tags",
             "metadata",
+            "additional_info",
             "status",
         ]
-        read_only_fields = ("status",)
+        read_only_fields = ("status", "metadata")
 
     def validate(self, data):
         if not data.get("recipients", []) and "audience_id" not in data:
@@ -188,8 +194,6 @@ class BroadcastSerializer(serializers.ModelSerializer):
                     "FCM and APNS are not configured. Please configure at least one to send mobile notifications.",
                     "fcm_and_apns_not_configured",
                 )
-
-        data["metadata"] = {}
 
         if data["merge_tags"] and "email" not in data.get("channels", {}):
             raise serializers.ValidationError(

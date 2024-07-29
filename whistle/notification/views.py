@@ -10,7 +10,6 @@ from rest_framework.generics import CreateAPIView
 from rest_framework.permissions import AllowAny
 from rest_framework.viewsets import GenericViewSet
 
-from audience.models import Audience
 from external_user.models import ExternalUser
 from notification.models import Notification, Broadcast
 from notification.serializers import (

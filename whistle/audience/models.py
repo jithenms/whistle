@@ -8,8 +8,8 @@ from organization.models import Organization
 class Audience(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE)
-    name = models.CharField(max_length=255)
-    description = models.CharField(max_length=255, blank=True)
+    name = models.CharField()
+    description = models.CharField(null=True, blank=True)
 
 
 class OperatorChoices(models.TextChoices):
@@ -28,8 +28,8 @@ class Filter(models.Model):
     audience = models.ForeignKey(
         Audience, on_delete=models.CASCADE, related_name="filters"
     )
-    property = models.CharField(max_length=255)
-    operator = models.CharField(choices=OperatorChoices.choices, max_length=255)
+    property = models.CharField()
+    operator = models.CharField(choices=OperatorChoices.choices)
     value = models.CharField()
 
     class Meta:

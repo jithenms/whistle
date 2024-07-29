@@ -10,13 +10,6 @@ from external_user.models import (
 
 
 class ExternalUserSerializer(serializers.ModelSerializer):
-    external_id = serializers.CharField(max_length=255, required=False)
-    first_name = serializers.CharField(max_length=255, required=False)
-    last_name = serializers.CharField(max_length=255, required=False)
-    email = serializers.CharField(max_length=255)
-    phone = serializers.CharField(max_length=255, required=False)
-    metadata = serializers.JSONField(required=False, default=dict)
-
     class Meta:
         model = ExternalUser
         fields = [
@@ -76,4 +69,7 @@ class ExternalUserDeviceSerializer(serializers.ModelSerializer):
         )
         validated_data["user"] = external_user
         response = super().create(validated_data)
+        logging.info(
+            "External user device with id: %s created for org: %s", response.id, org.id
+        )
         return response

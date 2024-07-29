@@ -8,7 +8,7 @@ from django.core import checks
 from django.db import models
 
 
-class EncryptedField(models.TextField):
+class EncryptedField(models.CharField):
     def __init__(self, key_id, cache_expiry=2592000, *args, **kwargs):
         kwargs.setdefault("editable", True)
         self.key_id = key_id

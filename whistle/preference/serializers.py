@@ -12,7 +12,7 @@ from preference.models import (
 
 
 class ExternalUserPreferenceChannelSerializer(serializers.ModelSerializer):
-    slug = serializers.CharField(max_length=255)
+    slug = serializers.CharField()
 
     class Meta:
         model = ExternalUserPreferenceChannel

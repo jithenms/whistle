@@ -63,7 +63,7 @@ class ExternalUserSubscriptionSerializer(serializers.ModelSerializer):
         external_id = self.context.get("external_id")
         with transaction.atomic():
             category_data = validated_data.pop("categories", [])
-            instance.slug = validated_data.get("slug", instance.slug)
+            instance.channel = validated_data.get("slug", instance.channel)
             instance.save()
 
             if self.partial:

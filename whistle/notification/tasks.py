@@ -33,7 +33,12 @@ from twilio.rest import Client
 from audience.models import Audience, OperatorChoices
 from connector.models import Twilio, Sendgrid, APNS, FCM
 from external_user.models import ExternalUser, ExternalUserDevice, PlatformChoices
-from notification.models import Notification, Broadcast, BroadcastRecipient
+from notification.models import (
+    Notification,
+    Broadcast,
+    BroadcastRecipient,
+    NotificationDelivery,
+)
 from preference.models import ExternalUserPreference, ChannelChoices
 from subscription.models import ExternalUserSubscription
 from whistle import utils
@@ -106,7 +111,12 @@ def send_broadcast(broadcast_id, org_id, data):
         ).exclude(**exclude_kwargs)
 
         for recipient in recipients.iterator():
-            tasks.append(handle_recipient.s(broadcast_id, org_id, recipient.id, data))
+            notification = persist_notification(org_id, broadcast_id, recipient.id)
+            tasks.append(
+                handle_recipient.s(
+                    broadcast_id, org_id, recipient.id, notification.id, data
+                )
+            )
             recipient_ids.add(recipient.id)
 
     if "recipients" in data:
@@ -116,9 +126,16 @@ def send_broadcast(broadcast_id, org_id, data):
             )
             if recipient_entity:
                 if recipient_entity.id not in recipient_ids:
+                    notification = persist_notification(
+                        org_id, broadcast_id, recipient_entity.id
+                    )
                     tasks.append(
                         handle_recipient.s(
-                            broadcast_id, org_id, recipient_entity.id, data
+                            broadcast_id,
+                            org_id,
+                            recipient_entity.id,
+                            notification.id,
+                            data,
                         )
                     )
                     recipient_ids.add(recipient_entity.id)
@@ -130,8 +147,11 @@ def send_broadcast(broadcast_id, org_id, data):
 
         for subscriber in subscribers.iterator():
             if subscriber.id not in recipient_ids:
+                notification = persist_notification(org_id, broadcast_id, subscriber.id)
                 tasks.append(
-                    handle_topic_subscriber.s(broadcast_id, org_id, subscriber, data)
+                    handle_topic_subscriber.s(
+                        broadcast_id, org_id, subscriber.id, notification.id, data
+                    )
                 )
                 recipient_ids.add(subscriber.id)
 
@@ -184,7 +204,7 @@ def build_exclude_kwargs(filters):
 
 
 @app.task
-def handle_recipient(broadcast_id, org_id, recipient_id, data):
+def handle_recipient(broadcast_id, org_id, recipient_id, notification_id, data):
     recipient = ExternalUser.objects.get(pk=recipient_id)
 
     if "category" in data:
@@ -196,21 +216,24 @@ def handle_recipient(broadcast_id, org_id, recipient_id, data):
             route_notification_with_preference(
                 broadcast_id,
                 org_id,
+                notification_id,
                 recipient,
                 preference.first().channels.all(),
                 data,
             )
             return recipient.id
         else:
-            route_basic_notification(broadcast_id, org_id, recipient, data)
+            route_basic_notification(
+                broadcast_id, org_id, notification_id, recipient, data
+            )
             return recipient.id
     else:
-        route_basic_notification(broadcast_id, org_id, recipient, data)
+        route_basic_notification(broadcast_id, org_id, notification_id, recipient, data)
         return recipient.id
 
 
 @app.task
-def handle_topic_subscriber(broadcast_id, org_id, subscriber_id, data):
+def handle_topic_subscriber(broadcast_id, org_id, subscriber_id, notification_id, data):
     subscriber = ExternalUserSubscription.objects.get(pk=subscriber_id)
 
     if "category" in data:
@@ -224,21 +247,26 @@ def handle_topic_subscriber(broadcast_id, org_id, subscriber_id, data):
             route_notification_with_preference(
                 broadcast_id,
                 org_id,
+                notification_id,
                 subscriber.user,
                 preference.first().channels.all(),
                 data,
             )
             return subscriber.id
         elif subscriber_category and subscriber_category.first().enabled:
-            route_basic_notification(broadcast_id, org_id, subscriber.user, data)
+            route_basic_notification(
+                broadcast_id, org_id, notification_id, subscriber.user, data
+            )
             return subscriber.id
     else:
-        route_basic_notification(broadcast_id, org_id, subscriber.user, data)
+        route_basic_notification(
+            broadcast_id, org_id, notification_id, subscriber.user, data
+        )
         return subscriber.id
 
 
 @app.task
-def send_sms(broadcast_id, org_id, user_id, data):
+def send_sms(broadcast_id, org_id, user_id, notification_id, data):
     try:
         user = ExternalUser.objects.get(id=user_id)
         twilio_connection = Twilio.objects.get(organization_id=org_id)
@@ -273,10 +301,8 @@ def send_sms(broadcast_id, org_id, user_id, data):
             status = "sent"
             reason = None
 
-        persist_notification(
-            broadcast_id,
-            org_id,
-            user_id,
+        persist_notification_delivery(
+            notification_id,
             data["channels"]["sms"].get("title", data["title"]),
             data["channels"]["sms"].get("content", data["content"]),
             data["channels"]["sms"].get("action_link", data["content"]),
@@ -296,13 +322,11 @@ def send_sms(broadcast_id, org_id, user_id, data):
         )
         reason = f"{error.status}: {error.msg}"
 
-        persist_notification(
-            broadcast_id,
-            org_id,
-            user_id,
+        persist_notification_delivery(
+            notification_id,
             data["channels"]["sms"].get("title", data["title"]),
             data["channels"]["sms"].get("content", data["content"]),
-            data["channels"]["sms"].get("action_link", data["content"]),
+            data["channels"]["sms"].get("action_link", data.get("action_link")),
             channel=ChannelChoices.SMS,
             status="failed",
             error_reason=reason,
@@ -312,7 +336,7 @@ def send_sms(broadcast_id, org_id, user_id, data):
 
 
 @app.task
-def send_email(broadcast_id, org_id, user_id, data):
+def send_email(broadcast_id, org_id, user_id, notification_id, data):
     try:
         user = ExternalUser.objects.get(id=user_id)
         sendgrid_conn = Sendgrid.objects.get(organization_id=org_id)
@@ -343,10 +367,8 @@ def send_email(broadcast_id, org_id, user_id, data):
             broadcast_id,
         )
 
-        persist_notification(
-            broadcast_id,
-            org_id,
-            user_id,
+        persist_notification_delivery(
+            notification_id,
             data["channels"]["email"].get("title", data["title"]),
             data["channels"]["email"].get("content", data["content"]),
             data["channels"]["email"].get("action_link", data.get("action_link")),
@@ -365,10 +387,8 @@ def send_email(broadcast_id, org_id, user_id, data):
             error.reason,
         )
 
-        persist_notification(
-            broadcast_id,
-            org_id,
-            user_id,
+        persist_notification_delivery(
+            notification_id,
             data["channels"]["email"].get("title", data["title"]),
             data["channels"]["email"].get("content", data["content"]),
             data["channels"]["email"].get("action_link", data["content"]),
@@ -381,15 +401,13 @@ def send_email(broadcast_id, org_id, user_id, data):
 
 
 @app.task
-def send_in_app(broadcast_id, org_id, user_id, data):
+def send_in_app(broadcast_id, org_id, user_id, notification_id, data):
     title = data["channels"]["in_app"].get("title", data["title"])
     content = data["channels"]["in_app"].get("content", data["content"])
-    action_link = data["channels"]["in_app"].get("action_link", data["content"])
+    action_link = data["channels"]["in_app"].get("action_link", data.get("action_link"))
 
-    notification = persist_notification(
-        broadcast_id,
-        org_id,
-        user_id,
+    notification = persist_notification_delivery(
+        notification_id,
         title,
         content,
         action_link,
@@ -420,7 +438,7 @@ def send_in_app(broadcast_id, org_id, user_id, data):
 
 
 @app.task
-def send_push(broadcast_id, org_id, user_id, data):
+def send_push(broadcast_id, org_id, user_id, notification_id, data):
     devices = ExternalUserDevice.objects.filter(user_id=user_id)
 
     if not devices:
@@ -475,14 +493,12 @@ def send_push(broadcast_id, org_id, user_id, data):
                         res,
                     )
 
-                    persist_notification(
-                        broadcast_id,
-                        org_id,
-                        user_id,
+                    persist_notification_delivery(
+                        notification_id,
                         data["channels"]["push"].get("title", data["title"]),
                         data["channels"]["push"].get("content", data["content"]),
                         data["channels"]["push"].get(
-                            "action_link", data["action_link"]
+                            "action_link", data.get("action_link")
                         ),
                         channel=ChannelChoices.PUSH,
                         status="sent",
@@ -498,14 +514,12 @@ def send_push(broadcast_id, org_id, user_id, data):
                         error.apns_id,
                     )
 
-                    persist_notification(
-                        broadcast_id,
-                        org_id,
-                        user_id,
+                    persist_notification_delivery(
+                        notification_id,
                         data["channels"]["push"].get("title", data["title"]),
                         data["channels"]["push"].get("content", data["content"]),
                         data["channels"]["push"].get(
-                            "action_link", data["action_link"]
+                            "action_link", data.get("action_link")
                         ),
                         channel=ChannelChoices.PUSH,
                         status="failed",
@@ -544,14 +558,12 @@ def send_push(broadcast_id, org_id, user_id, data):
                         res,
                     )
 
-                    persist_notification(
-                        broadcast_id,
-                        org_id,
-                        user_id,
+                    persist_notification_delivery(
+                        notification_id,
                         data["channels"]["push"].get("title", data["title"]),
                         data["channels"]["push"].get("content", data["content"]),
                         data["channels"]["push"].get(
-                            "action_link", data["action_link"]
+                            "action_link", data.get("action_link")
                         ),
                         channel=ChannelChoices.PUSH,
                         status="sent",
@@ -566,14 +578,12 @@ def send_push(broadcast_id, org_id, user_id, data):
                         e,
                     )
 
-                    persist_notification(
-                        broadcast_id,
-                        org_id,
-                        user_id,
+                    persist_notification_delivery(
+                        notification_id,
                         data["channels"]["push"].get("title", data["title"]),
                         data["channels"]["push"].get("content", data["content"]),
                         data["channels"]["push"].get(
-                            "action_link", data["action_link"]
+                            "action_link", data.get("action_link")
                         ),
                         channel=ChannelChoices.PUSH,
                         status="failed",
@@ -599,13 +609,27 @@ def add_broadcast_recipient(_, broadcast_id, recipient_id):
     )
 
 
-def persist_notification(
-    broadcast_id, org_id, user_id, title, content, action_link, **kwargs
-):
+def persist_notification(org_id, broadcast_id, recipient_id, **kwargs):
     notification = Notification.objects.create(
         organization_id=org_id,
-        recipient_id=user_id,
         broadcast_id=broadcast_id,
+        recipient_id=recipient_id,
+        **kwargs,
+    )
+
+    logging.info(
+        "Notification record with id: %s persisted for notification: %s",
+        notification.id,
+    )
+
+    return notification
+
+
+def persist_notification_delivery(
+    notification_id, title, content, action_link, **kwargs
+):
+    notification_channel = NotificationDelivery.objects.create(
+        notification_id=notification_id,
         title=title,
         content=content,
         action_link=action_link,
@@ -613,14 +637,11 @@ def persist_notification(
     )
 
     logging.info(
-        "Notification record with id: %s persisted for user: %s and org: %s for broadcast: %s",
-        notification.id,
-        user_id,
-        org_id,
-        broadcast_id,
+        "Notification channel record with id: %s persisted for notification: %s",
+        notification_channel.id,
     )
 
-    return notification
+    return notification_channel
 
 
 def update_or_create_external_user(broadcast_id, org_id, recipient, data):
@@ -687,7 +708,9 @@ def update_or_create_external_user(broadcast_id, org_id, recipient, data):
             return None
 
 
-def route_notification_with_preference(broadcast_id, org_id, recipient, channels, data):
+def route_notification_with_preference(
+    broadcast_id, org_id, notification_id, recipient, channels, data
+):
     tasks = []
 
     logging.info(
@@ -700,7 +723,9 @@ def route_notification_with_preference(broadcast_id, org_id, recipient, channels
     if data["channels"]["in_app"]["enabled"]:
         web_preference_entity = channels.get(slug=ChannelChoices.IN_APP.value)
         if web_preference_entity.enabled:
-            tasks.append(send_in_app.s(broadcast_id, org_id, recipient.id, data))
+            tasks.append(
+                send_in_app.s(broadcast_id, org_id, recipient.id, notification_id, data)
+            )
         else:
             logging.info(
                 "In app disabled for category %s for user: %s in org: %s for broadcast: %s",
@@ -709,10 +734,8 @@ def route_notification_with_preference(broadcast_id, org_id, recipient, channels
                 org_id,
                 broadcast_id,
             )
-            persist_notification(
-                broadcast_id,
-                org_id,
-                recipient.id,
+            persist_notification_delivery(
+                notification_id,
                 data["channels"]["in_app"].get("title", data["title"]),
                 data["channels"]["in_app"].get("content", data["content"]),
                 data["channels"]["in_app"].get("action_link", data.get("action_link")),
@@ -732,10 +755,8 @@ def route_notification_with_preference(broadcast_id, org_id, recipient, channels
                 org_id,
                 broadcast_id,
             )
-            persist_notification(
-                broadcast_id,
-                org_id,
-                recipient.id,
+            persist_notification_delivery(
+                notification_id,
                 data["channels"]["sms"].get("title", data["title"]),
                 data["channels"]["sms"].get("content", data["content"]),
                 data["channels"]["sms"].get("action_link", data.get("action_link")),
@@ -751,10 +772,8 @@ def route_notification_with_preference(broadcast_id, org_id, recipient, channels
                 org_id,
                 broadcast_id,
             )
-            persist_notification(
-                broadcast_id,
-                org_id,
-                recipient.id,
+            persist_notification_delivery(
+                notification_id,
                 data["channels"]["sms"].get("title", data["title"]),
                 data["channels"]["sms"].get("content", data["content"]),
                 data["channels"]["sms"].get("action_link", data.get("action_link")),
@@ -766,7 +785,9 @@ def route_notification_with_preference(broadcast_id, org_id, recipient, channels
     if data["channels"]["email"]["enabled"]:
         email_preference_entity = channels.get(slug=ChannelChoices.EMAIL.value)
         if email_preference_entity.enabled:
-            tasks.append(send_email.s(broadcast_id, org_id, recipient.id, data))
+            tasks.append(
+                send_email.s(broadcast_id, org_id, recipient.id, notification_id, data)
+            )
         else:
             logging.info(
                 "Email disabled for category: %s for user: %s in org: %s for broadcast: %s",
@@ -775,10 +796,8 @@ def route_notification_with_preference(broadcast_id, org_id, recipient, channels
                 org_id,
                 broadcast_id,
             )
-            persist_notification(
-                broadcast_id,
-                org_id,
-                recipient.id,
+            persist_notification_delivery(
+                notification_id,
                 data["channels"]["email"].get("title", data["title"]),
                 data["channels"]["email"].get("content", data["content"]),
                 data["channels"]["email"].get("action_link", data.get("action_link")),
@@ -790,7 +809,9 @@ def route_notification_with_preference(broadcast_id, org_id, recipient, channels
     if data["channels"]["push"]["enabled"]:
         mobile_preference_entity = channels.get(slug=ChannelChoices.PUSH.value)
         if mobile_preference_entity.enabled:
-            tasks.append(send_push.s(broadcast_id, org_id, recipient.id, data))
+            tasks.append(
+                send_push.s(broadcast_id, org_id, recipient.id, notification_id, data)
+            )
         else:
             logging.info(
                 "Mobile push disabled for category: %s for user: %s in org: %s for broadcast: %s",
@@ -799,10 +820,8 @@ def route_notification_with_preference(broadcast_id, org_id, recipient, channels
                 org_id,
                 broadcast_id,
             )
-            persist_notification(
-                broadcast_id,
-                org_id,
-                recipient.id,
+            persist_notification_delivery(
+                notification_id,
                 data["channels"]["push"].get("title", data["title"]),
                 data["channels"]["push"].get("content", data["content"]),
                 data["channels"]["push"].get("action_link", data.get("action_link")),
@@ -816,7 +835,7 @@ def route_notification_with_preference(broadcast_id, org_id, recipient, channels
     return result.id
 
 
-def route_basic_notification(broadcast_id, org_id, recipient, data):
+def route_basic_notification(broadcast_id, org_id, notification_id, recipient, data):
     tasks = []
 
     logging.info(
@@ -829,10 +848,14 @@ def route_basic_notification(broadcast_id, org_id, recipient, data):
     logging.info(data["channels"])
 
     if data["channels"]["in_app"]["enabled"]:
-        tasks.append(send_in_app.s(broadcast_id, org_id, recipient.id, data))
+        tasks.append(
+            send_in_app.s(broadcast_id, org_id, recipient.id, notification_id, data)
+        )
 
     if data["channels"]["sms"]["enabled"] and recipient.phone:
-        tasks.append(send_sms.s(broadcast_id, org_id, recipient.id, data))
+        tasks.append(
+            send_sms.s(broadcast_id, org_id, recipient.id, notification_id, data)
+        )
     elif data["channels"]["sms"]["enabled"] and not recipient.phone:
         logging.warning(
             "Trying to route SMS notification without phone on record for user: %s in org: %s for broadcast: %s",
@@ -840,10 +863,8 @@ def route_basic_notification(broadcast_id, org_id, recipient, data):
             org_id,
             broadcast_id,
         )
-        persist_notification(
-            broadcast_id,
-            org_id,
-            recipient.id,
+        persist_notification_delivery(
+            notification_id,
             data["channels"]["sms"].get("title", data["title"]),
             data["channels"]["sms"].get("content", data["content"]),
             data["channels"]["sms"].get("action_link", data.get("action_link")),
@@ -852,9 +873,13 @@ def route_basic_notification(broadcast_id, org_id, recipient, data):
             error_reason="No phone provided for user",
         )
     if data["channels"]["email"]["enabled"]:
-        tasks.append(send_email.s(broadcast_id, org_id, recipient.id, data))
+        tasks.append(
+            send_email.s(broadcast_id, org_id, recipient.id, notification_id, data)
+        )
     if data["channels"]["push"]["enabled"]:
-        tasks.append(send_push.s(broadcast_id, org_id, recipient.id, data))
+        tasks.append(
+            send_push.s(broadcast_id, org_id, recipient.id, notification_id, data)
+        )
 
     result = chord(tasks)(add_broadcast_recipient.s(broadcast_id, recipient.id))
 

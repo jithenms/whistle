@@ -37,10 +37,17 @@ class Notification(models.Model):
     organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
     broadcast = models.ForeignKey(Broadcast, on_delete=models.PROTECT)
     recipient = models.ForeignKey(ExternalUser, on_delete=models.PROTECT)
+
+
+class NotificationDelivery(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    notification = models.ForeignKey(
+        Notification, on_delete=models.PROTECT, related_name="deliveries"
+    )
+    channel = models.CharField(choices=ChannelChoices.choices)
     title = models.CharField()
     content = models.CharField()
     action_link = models.CharField()
-    channel = models.CharField(choices=ChannelChoices.choices)
     status = models.CharField()
     error_reason = models.CharField(null=True, blank=True)
     metadata = models.JSONField(null=True, blank=True)

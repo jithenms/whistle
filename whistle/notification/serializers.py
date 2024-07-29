@@ -9,6 +9,7 @@ from external_user.serializers import ExternalUserSerializer
 from notification.models import (
     Notification,
     Broadcast,
+    NotificationDelivery,
 )
 
 
@@ -39,13 +40,10 @@ class PushSerializer(serializers.Serializer):
     enabled = serializers.BooleanField(default=False)
 
 
-class NotificationSerializer(serializers.ModelSerializer):
+class NotificationDeliverySerializer(serializers.ModelSerializer):
     class Meta:
-        model = Notification
+        model = NotificationDelivery
         fields = [
-            "id",
-            "broadcast_id",
-            "recipient_id",
             "title",
             "content",
             "action_link",
@@ -60,8 +58,6 @@ class NotificationSerializer(serializers.ModelSerializer):
             "archived_at",
         ]
         read_only_fields = (
-            "broadcast_id",
-            "recipient_id",
             "sent_at",
             "channel",
             "status",
@@ -81,6 +77,16 @@ class NotificationSerializer(serializers.ModelSerializer):
             if field in validated_data:
                 validated_data.pop(field)
         return super().update(instance, validated_data)
+
+
+class NotificationSerializer(serializers.ModelSerializer):
+    deliveries = NotificationDeliverySerializer(read_only=True, many=True)
+    recipient = ExternalUserSerializer(read_only=True)
+
+    class Meta:
+        model = Notification
+        fields = ["id", "broadcast_id", "recipient", "deliveries"]
+        read_only_fields = ("broadcast_id", "recipient_id", "deliveries")
 
 
 class BroadcastChannelSerializer(serializers.Serializer):

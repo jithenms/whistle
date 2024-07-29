@@ -81,7 +81,7 @@ class NotificationSerializer(serializers.ModelSerializer):
             "clicked_at",
             "archived_at",
         ]
-        read_only_fields = ("broadcast_id", "recipient_id", "deliveries")
+        read_only_fields = ("broadcast", "recipient", "deliveries")
 
 
 class BroadcastChannelSerializer(serializers.Serializer):

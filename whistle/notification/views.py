@@ -142,7 +142,7 @@ class BroadcastViewSet(
     def delete(self, request, *args, **kwargs):
         broadcast = Broadcast.objects.get(kwargs.get(self.lookup_field))
         if broadcast.schedule_at and broadcast.status == "scheduled":
-            key = f"whistle:schedule:broadcast:{broadcast.id}"
+            key = f"redbeat:broadcast_{broadcast.id}"
             entry = RedBeatScheduler(app=app).Entry.from_key(key=key, app=app)
             entry.delete()
             broadcast.delete()
@@ -180,7 +180,7 @@ class BroadcastViewSet(
         try:
             schedule_at = serializer.validated_data.get("schedule_at")
             entry = RedBeatSchedulerEntry(app=app)
-            entry.name = f":broadcast:{broadcast.id}"
+            entry.name = f"broadcast_{broadcast.id}"
             entry.task = "notification.tasks.send_broadcast"
             entry.args = [
                 str(broadcast.id),

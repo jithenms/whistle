@@ -12,7 +12,7 @@ kms_cache = aws_encryption_sdk.LocalCryptoMaterialsCache(settings.KMS_CACHE_CAPA
 
 
 class EncryptedField(models.CharField):
-    def __init__(self, key_id, cache_expiry=3600.0, *args, **kwargs):
+    def __init__(self, key_id, cache_expiry=settings.KMS_CACHE_EXPIRY, *args, **kwargs):
         kwargs.setdefault("editable", True)
         self.key_id = key_id
         self.kms_key_provider = aws_encryption_sdk.StrictAwsKmsMasterKeyProvider(

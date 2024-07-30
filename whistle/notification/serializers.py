@@ -9,6 +9,7 @@ from notification.models import (
     NotificationDelivery,
 )
 from preference.models import ChannelChoices
+from provider.models import Provider, ProviderTypeChoices
 
 
 class NotificationDeliverySerializer(serializers.ModelSerializer):
@@ -165,6 +166,51 @@ class BroadcastSerializer(serializers.ModelSerializer):
                 "'recipients' or 'audience_id' not provided. Please provide either 'recipients' or an 'audience_id'.",
                 "recipients_or_audience_id_not_provided",
             )
+
+        if ProviderTypeChoices.EMAIL.value in data["channels"]:
+            providers = Provider.objects.filter(
+                organization=self.context["request"].user,
+                provider_type=ProviderTypeChoices.EMAIL,
+                enabled=True,
+            ).count()
+            if providers == 0:
+                raise serializers.ValidationError(
+                    {
+                        "channels": "No email providers configured or enabled. Please configure an email provider"
+                        " to send emails."
+                    },
+                    "email_providers_not_configured",
+                )
+
+        if ProviderTypeChoices.PUSH.value in data["channels"]:
+            providers = Provider.objects.filter(
+                organization=self.context["request"].user,
+                provider_type=ProviderTypeChoices.PUSH,
+                enabled=True,
+            ).count()
+            if providers == 0:
+                raise serializers.ValidationError(
+                    {
+                        "channels": "No push providers configured or enabled. Please configure a push provider"
+                        " to send push notifications."
+                    },
+                    "push_providers_not_configured",
+                )
+
+        if ProviderTypeChoices.SMS.value in data["channels"]:
+            providers = Provider.objects.filter(
+                organization=self.context["request"].user,
+                provider_type=ProviderTypeChoices.SMS,
+                enabled=True,
+            ).count()
+            if providers == 0:
+                raise serializers.ValidationError(
+                    {
+                        "channels": "No SMS providers configured or enabled. Please configure an SMS provider"
+                        " to send texts."
+                    },
+                    "sms_providers_not_configured",
+                )
 
         if "audience_id" in data:
             try:

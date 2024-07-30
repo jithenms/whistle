@@ -16,7 +16,7 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.CreateModel(
-            name="Audience",
+            name="Provider",
             fields=[
                 (
                     "id",
@@ -27,8 +27,24 @@ class Migration(migrations.Migration):
                         serialize=False,
                     ),
                 ),
-                ("name", models.CharField()),
-                ("description", models.CharField(blank=True, null=True)),
+                (
+                    "provider_type",
+                    models.CharField(
+                        choices=[("SMS", "SMS"), ("EMAIL", "EMAIL"), ("PUSH", "PUSH")]
+                    ),
+                ),
+                (
+                    "provider",
+                    models.CharField(
+                        choices=[
+                            ("TWILIO", "TWILIO"),
+                            ("SENDGRID", "SENDGRID"),
+                            ("APNS", "APNS"),
+                            ("FCM", "FCM"),
+                        ]
+                    ),
+                ),
+                ("enabled", models.BooleanField(default=True)),
                 (
                     "organization",
                     models.ForeignKey(
@@ -37,9 +53,12 @@ class Migration(migrations.Migration):
                     ),
                 ),
             ],
+            options={
+                "unique_together": {("organization", "provider")},
+            },
         ),
         migrations.CreateModel(
-            name="Filter",
+            name="ProviderCredential",
             fields=[
                 (
                     "id",
@@ -50,22 +69,7 @@ class Migration(migrations.Migration):
                         serialize=False,
                     ),
                 ),
-                ("property", models.CharField()),
-                (
-                    "operator",
-                    models.CharField(
-                        choices=[
-                            ("GT", "GT"),
-                            ("LT", "LT"),
-                            ("GTE", "GTE"),
-                            ("LTE", "LTE"),
-                            ("EQ", "EQ"),
-                            ("NEQ", "NEQ"),
-                            ("CONTAINS", "CONTAINS"),
-                            ("DOES_NOT_CONTAIN", "DOES_NOT_CONTAIN"),
-                        ]
-                    ),
-                ),
+                ("slug", models.SlugField()),
                 (
                     "value",
                     whistle.fields.EncryptedField(
@@ -73,16 +77,16 @@ class Migration(migrations.Migration):
                     ),
                 ),
                 (
-                    "audience",
+                    "provider",
                     models.ForeignKey(
                         on_delete=django.db.models.deletion.CASCADE,
-                        related_name="filters",
-                        to="audience.audience",
+                        related_name="credentials",
+                        to="provider.provider",
                     ),
                 ),
             ],
             options={
-                "unique_together": {("audience", "property")},
+                "unique_together": {("provider", "slug")},
             },
         ),
     ]

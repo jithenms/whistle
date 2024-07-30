@@ -20,12 +20,12 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 
 from audience.views import AudienceViewSet
-from connector.views import SendgridViewSet, TwilioViewSet, APNSViewSet, FCMViewSet
-from external_user.views import ExternalUserViewSet, ExternalUserDeviceViewSet
+from provider.views import TwilioViewSet, SendgridViewSet, APNSViewSet, FCMViewSet
+from external_user.views import ExternalUserViewSet, DeviceViewSet
 from notification.views import NotificationViewSet, BroadcastViewSet
 from organization.views import OrganizationViewSet, OrganizationCredentialsViewSet
-from preference.views import ExternalUserPreferenceViewSet
-from subscription.views import ExternalUserSubscriptionViewSet
+from preference.views import PreferenceViewSet
+from subscription.views import SubscriptionViewSet
 
 # DO NOT REMOVE used for openapi spec generation
 import whistle.extensions
@@ -38,23 +38,17 @@ v1_router.register(
 )
 v1_router.register(r"organizations", OrganizationViewSet, basename="organizations")
 v1_router.register(r"users", ExternalUserViewSet, basename="external_users")
-v1_router.register(
-    r"devices", ExternalUserDeviceViewSet, basename="external_users_devices"
-)
-v1_router.register(
-    r"preferences", ExternalUserPreferenceViewSet, basename="preferences"
-)
-v1_router.register(
-    r"subscriptions", ExternalUserSubscriptionViewSet, basename="subscriptions"
-)
+v1_router.register(r"devices", DeviceViewSet, basename="devices")
+v1_router.register(r"preferences", PreferenceViewSet, basename="preferences")
+v1_router.register(r"subscriptions", SubscriptionViewSet, basename="subscriptions")
 v1_router.register(r"broadcasts", BroadcastViewSet, basename="broadcasts")
 v1_router.register(r"notifications", NotificationViewSet, basename="notifications")
-v1_router.register(r"connectors/twilio", TwilioViewSet, basename="connectors.twilio")
 v1_router.register(
-    r"connectors/sendgrid", SendgridViewSet, basename="connectors.sendgrid"
+    r"providers/sendgrid", SendgridViewSet, basename="providers.sendgrid"
 )
-v1_router.register(r"connectors/apns", APNSViewSet, basename="connectors.apns")
-v1_router.register(r"connectors/fcm", FCMViewSet, basename="connectors.fcm")
+v1_router.register(r"providers/twilio", TwilioViewSet, basename="providers.twilio")
+v1_router.register(r"providers/apns", APNSViewSet, basename="providers.apns")
+v1_router.register(r"providers/fcm", FCMViewSet, basename="providers.fcm")
 v1_router.register(r"audiences", AudienceViewSet, basename="audiences")
 
 urlpatterns = [

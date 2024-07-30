@@ -41,7 +41,6 @@ if ENVIRONMENT and SENTRY_DSN:
     )
 
 INSTALLED_APPS = [
-    "connector",
     "notification",
     "external_user",
     "preference",
@@ -50,6 +49,7 @@ INSTALLED_APPS = [
     "user",
     "realtime",
     "audience",
+    "provider",
     "daphne",
     "django.contrib.admin",
     "django.contrib.auth",
@@ -94,7 +94,7 @@ SPECTACULAR_SETTINGS = {
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
     "COMPONENT_SPLIT_REQUEST": True,
-    'PREPROCESSING_HOOKS': ["whistle.extensions.preprocess_endpoints"]
+    "PREPROCESSING_HOOKS": ["whistle.extensions.preprocess_endpoints"],
 }
 
 ROOT_URLCONF = "whistle.urls"
@@ -198,11 +198,15 @@ CELERY_RESULT_BACKEND = os.environ.get(
 )
 
 CELERY_BEAT_MAX_LOOP_INTERVAL = 5
+
 REDBEAT_LOCK_TIMEOUT = CELERY_BEAT_MAX_LOOP_INTERVAL + 60
 
 REDBEAT_REDIS_URL = os.environ.get("REDBEAT_REDIS_URL", "redis://127.0.0.1:6379/0")
 
-REDIS_CACHE_URL = os.environ.get("REDIS_CACHE_URL", "redis://127.0.0.1:6379/0")
-
 JWKS_ENDPOINT_URL = os.getenv("JWKS_ENDPOINT_URL")
 USE_SENDGRID_SANDBOX = bool(os.getenv("USE_SENDGRID_SANDBOX", 0))
+
+KMS_PERSONAL_DATA_KEY_ARN = os.environ["KMS_PERSONAL_DATA_KEY_ARN"]
+KMS_API_CREDENTIALS_KEY_ARN = os.environ["KMS_API_CREDENTIALS_KEY_ARN"]
+KMS_CACHE_CAPACITY = os.getenv("KMS_CACHE_CAPACITY", 100)
+KMS_CACHE_EXPIRY = os.getenv("KMS_CACHE_EXPIRY", 1800.0)

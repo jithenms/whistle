@@ -23,30 +23,30 @@ class ExternalUserSubscriptionSerializer(serializers.ModelSerializer):
         model = ExternalUserSubscription
         fields = ["id", "topic", "categories"]
 
+    @transaction.atomic
     def create(self, validated_data):
         org = self.context["request"].user
         external_id = self.context.get("external_id")
         try:
-            with transaction.atomic():
-                category_data = validated_data.pop("categories", [])
-                external_user = ExternalUser.objects.get(external_id=external_id)
-                user_subscription = ExternalUserSubscription.objects.create(
-                    organization=org, user=external_user, topic=validated_data["topic"]
+            category_data = validated_data.pop("categories", [])
+            external_user = ExternalUser.objects.get(external_id=external_id)
+            user_subscription = ExternalUserSubscription.objects.create(
+                organization=org, user=external_user, topic=validated_data["topic"]
+            )
+
+            for cat in category_data:
+                ExternalUserSubscriptionCategory.objects.create(
+                    user_subscription=user_subscription, **cat
                 )
 
-                for cat in category_data:
-                    ExternalUserSubscriptionCategory.objects.create(
-                        user_subscription=user_subscription, **cat
-                    )
+            logging.info(
+                "Subscription with id: %s created for user: %s in org: %s",
+                user_subscription.id,
+                external_user.id,
+                org.id,
+            )
 
-                logging.info(
-                    "Subscription with id: %s created for user: %s in org: %s",
-                    user_subscription.id,
-                    external_user.id,
-                    org.id,
-                )
-
-                return user_subscription
+            return user_subscription
         except ExternalUser.DoesNotExist:
             logging.error(
                 "Invalid external id: %s provided for org: %s while creating subscription",
@@ -58,35 +58,35 @@ class ExternalUserSubscriptionSerializer(serializers.ModelSerializer):
                 "invalid_external_id",
             )
 
+    @transaction.atomic
     def update(self, instance, validated_data, **kwargs):
         org = self.context["request"].user
         external_id = self.context.get("external_id")
-        with transaction.atomic():
-            category_data = validated_data.pop("categories", [])
-            instance.slug = validated_data.get("slug", instance.slug)
-            instance.save()
+        category_data = validated_data.pop("categories", [])
+        instance.channel = validated_data.get("slug", instance.channel)
+        instance.save()
 
-            if self.partial:
-                for category in category_data:
-                    ExternalUserSubscriptionCategory.objects.update_or_create(
-                        user_subscription=instance,
-                        slug=category.get("slug"),
-                        defaults={"description": category.get("description")},
-                    )
-            else:
-                ExternalUserSubscriptionCategory.objects.filter(
-                    user_subscription=instance
-                ).delete()
-                for category in category_data:
-                    ExternalUserSubscriptionCategory.objects.create(
-                        user_preference=instance, **category
-                    )
+        if self.partial:
+            for category in category_data:
+                ExternalUserSubscriptionCategory.objects.update_or_create(
+                    user_subscription=instance,
+                    slug=category.get("slug"),
+                    defaults={"description": category.get("description")},
+                )
+        else:
+            ExternalUserSubscriptionCategory.objects.filter(
+                user_subscription=instance
+            ).delete()
+            for category in category_data:
+                ExternalUserSubscriptionCategory.objects.create(
+                    user_preference=instance, **category
+                )
 
-            logging.info(
-                "Subscription with id: %s updated for user: %s in org: %s",
-                instance.id,
-                instance.user.id,
-                org.id,
-            )
+        logging.info(
+            "Subscription with id: %s updated for user: %s in org: %s",
+            instance.id,
+            instance.user.id,
+            org.id,
+        )
 
-            return instance
+        return instance

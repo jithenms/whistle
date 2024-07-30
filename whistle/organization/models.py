@@ -3,13 +3,13 @@ import uuid
 from django.db import models
 
 from user.models import User
-from whistle import utils
+from whistle import fields, utils, settings
 
 
 class Organization(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     clerk_org_id = models.TextField(unique=True)
-    name = models.CharField(max_length=255)
+    name = models.CharField()
     slug = models.SlugField(unique=True)
 
 
@@ -18,19 +18,19 @@ class OrganizationCredentials(models.Model):
         Organization, on_delete=models.CASCADE, primary_key=True
     )
 
-    api_key = utils.EncryptedField(key_id="alias/APICredentials")
+    api_key = fields.EncryptedField(key_id=settings.KMS_PERSONAL_DATA_KEY_ARN)
     api_key_hash = models.TextField(unique=True)
 
-    api_secret = utils.EncryptedField(key_id="alias/APICredentials")
+    api_secret = fields.EncryptedField(key_id=settings.KMS_PERSONAL_DATA_KEY_ARN)
     api_secret_hash = models.TextField(unique=True)
 
     api_secret_salt = models.TextField(unique=True)
 
     def save(self, *args, **kwargs):
         if self.api_key:
-            self.api_key_hash = utils.hash_value(self.api_key)
+            self.api_key_hash = utils.perform_hash(self.api_key)
         if self.api_secret:
-            self.api_secret_hash = utils.hash_value(
+            self.api_secret_hash = utils.perform_hash(
                 self.api_secret, self.api_secret_salt
             )
         return super().save(*args, **kwargs)
@@ -40,4 +40,4 @@ class OrganizationMember(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE)
     user = models.ForeignKey(User, on_delete=models.PROTECT)
-    role = models.CharField(max_length=255)
+    role = models.CharField()

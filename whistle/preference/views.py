@@ -10,7 +10,7 @@ from preference.serializers import ExternalUserPreferenceSerializer
 from whistle.auth import ClientAuth, IsValidExternalId
 
 
-class ExternalUserPreferenceViewSet(ModelViewSet):
+class PreferenceViewSet(ModelViewSet):
     queryset = ExternalUserPreference.objects.all()
     serializer_class = ExternalUserPreferenceSerializer
     authentication_classes = [ClientAuth]

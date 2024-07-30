@@ -29,7 +29,7 @@ class ExternalUserViewSet(ModelViewSet):
         return self.queryset.filter(organization=self.request.user)
 
 
-class ExternalUserDeviceViewSet(ModelViewSet):
+class DeviceViewSet(ModelViewSet):
     queryset = ExternalUserDevice.objects.all()
     serializer_class = ExternalUserDeviceSerializer
     authentication_classes = [ClientAuth]

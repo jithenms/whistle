@@ -42,8 +42,22 @@ def custom_exception_handler(exc, context):
             elif isinstance(exc.detail, list):
                 if len(exc.detail) == 1:
                     detail = exc.detail[0]
+                else:
+                    detail = exc.detail
             else:
                 detail = exc.detail
+
+            for field, errors in detail.items():
+                if isinstance(errors, dict) and "non_field_errors" in errors:
+                    if (
+                        isinstance(errors["non_field_errors"], list)
+                        and len(errors["non_field_errors"]) == 1
+                    ):
+                        detail[field] = errors["non_field_errors"][0]
+                    else:
+                        detail[field] = errors["non_field_errors"]
+                else:
+                    detail[field] = errors
 
             return generate_error_response(code=code, detail=detail)
         elif isinstance(exc, PermissionDenied):

@@ -1,16 +1,17 @@
 import logging
-import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
+from celery.schedules import schedule
+from django.db import transaction
 from django.http import JsonResponse
 from drf_spectacular.utils import extend_schema, OpenApiParameter
+from redbeat import RedBeatSchedulerEntry, RedBeatScheduler
 from rest_framework import mixins, status
 from rest_framework.exceptions import ValidationError
 from rest_framework.generics import CreateAPIView
 from rest_framework.permissions import AllowAny
 from rest_framework.viewsets import GenericViewSet
 
-from audience.models import Audience
 from external_user.models import ExternalUser
 from notification.models import Notification, Broadcast
 from notification.serializers import (
@@ -23,8 +24,9 @@ from whistle.auth import (
     ServerAuth,
     IsValidExternalId,
 )
+from whistle.celery import app
 from whistle.pagination import StandardLimitOffsetPagination
-from .tasks import schedule_broadcast, send_broadcast
+from .tasks import send_broadcast
 
 
 class NotificationViewSet(
@@ -125,40 +127,89 @@ class BroadcastViewSet(
 
         instance = serializer.save(status="queued", sent_at=datetime.now(timezone.utc))
 
-        try:
-            schedule_at = serializer.validated_data.get("schedule_at")
-            if schedule_at:
-                schedule_broadcast.delay(
-                    str(instance.id),
-                    str(self.request.user.id),
-                    serializer.validated_data,
-                )
-            else:
-                send_broadcast.delay(
-                    str(instance.id),
-                    str(self.request.user.id),
-                    serializer.validated_data,
-                )
-                logging.info(
-                    "Broadcast queued with id: %s for org: %s",
-                    instance.id,
-                    self.request.user.id,
-                )
-        except Exception as error:
-            logging.debug(error)
-            instance.status = "failed"
-            instance.save()
-            logging.info(
-                "Broadcast failed to queue with id: %s for org: %s",
-                instance.id,
-                self.request.user.id,
-            )
+        schedule_at = serializer.validated_data.get("schedule_at")
+        if schedule_at:
+            self.schedule_broadcast(instance, serializer)
+        else:
+            self.queue_broadcast(instance, serializer)
         response_data = serializer.validated_data
-        if "channels" in response_data:
-            response_data.pop("channels")
-        if "filters" in response_data:
-            response_data.pop("filters")
         return JsonResponse(
             {**response_data, "status": instance.status},
             status=status.HTTP_200_OK,
         )
+
+    @transaction.atomic()
+    def delete(self, request, *args, **kwargs):
+        broadcast = Broadcast.objects.get(kwargs.get(self.lookup_field))
+        if broadcast.schedule_at and broadcast.status == "scheduled":
+            key = f"redbeat:broadcast_{broadcast.id}"
+            entry = RedBeatScheduler(app=app).Entry.from_key(key=key, app=app)
+            entry.delete()
+            broadcast.delete()
+            return JsonResponse(
+                {"status": "success"}, status=status.HTTP_204_NO_CONTENT
+            )
+        else:
+            raise ValidationError(
+                "Broadcast has already been delivered and cannot be deleted."
+            )
+
+    def queue_broadcast(self, broadcast, serializer):
+        try:
+            send_broadcast.delay(
+                str(broadcast.id),
+                str(self.request.user.id),
+                serializer.validated_data,
+            )
+            logging.info(
+                "Broadcast queued with id: %s for org: %s",
+                broadcast.id,
+                self.request.user.id,
+            )
+        except Exception as error:
+            logging.debug(error)
+            broadcast.status = "failed"
+            broadcast.save()
+            logging.info(
+                "Broadcast failed to queue with id: %s for org: %s",
+                broadcast.id,
+                self.request.user.id,
+            )
+
+    def schedule_broadcast(self, broadcast, serializer):
+        try:
+            schedule_at = serializer.validated_data.get("schedule_at")
+            entry = RedBeatSchedulerEntry(app=app)
+            entry.name = f"broadcast_{broadcast.id}"
+            entry.task = "notification.tasks.send_broadcast"
+            entry.args = [
+                str(broadcast.id),
+                str(self.request.user.id),
+                serializer.validated_data,
+            ]
+            entry.schedule = schedule(
+                max(
+                    schedule_at - datetime.now(tz=schedule_at.tzinfo),
+                    timedelta(0),
+                )
+            )
+            entry.save()
+            broadcast.schedule_at = schedule_at
+            broadcast.status = "scheduled"
+            broadcast.save()
+            logging.info(
+                "Broadcast scheduled at: %s with id: %s for org: %s",
+                schedule_at,
+                broadcast.id,
+                self.request.user.id,
+            )
+        except Exception as error:
+            broadcast.status = "failed"
+            broadcast.save()
+            logging.error(
+                "Failed to schedule broadcast: %s in org: %s with error: %s",
+                broadcast.id,
+                self.request.user.id,
+                error,
+            )
+            raise

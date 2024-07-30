@@ -10,7 +10,7 @@ class ExternalUserSubscription(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE)
     user = models.ForeignKey(ExternalUser, on_delete=models.CASCADE)
-    topic = models.CharField(max_length=255)
+    topic = models.CharField()
 
     class Meta:
         unique_together = [["organization", "topic"]]
@@ -22,7 +22,7 @@ class ExternalUserSubscriptionCategory(models.Model):
         ExternalUserSubscription, related_name="categories", on_delete=models.CASCADE
     )
     slug = models.SlugField()
-    description = models.CharField(max_length=255, blank=True)
+    description = models.CharField(null=True, blank=True)
     enabled = models.BooleanField(default=True)
 
     class Meta:

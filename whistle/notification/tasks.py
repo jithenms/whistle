@@ -244,7 +244,7 @@ def send_sms(broadcast_id, org_id, user_id, notification_id, data):
         organization_id=org_id, provider_type=ProviderTypeChoices.SMS
     )
 
-    for provider in providers.iterator():
+    for provider in providers.all():
         match provider.provider:
             case ProviderChoices.TWILIO.value:
                 handle_twilio(broadcast_id, data, notification_id, provider, user)
@@ -790,7 +790,7 @@ def route_notification_with_preference(
             persist_notification_delivery(
                 notification_id,
                 channel=ChannelChoices.SMS,
-                status="failed",
+                status="not_sent",
                 error_reason="No phone provided for user",
             )
         else:
@@ -864,7 +864,7 @@ def route_basic_notification(broadcast_id, org_id, notification_id, recipient, d
             send_in_app.s(broadcast_id, org_id, recipient.id, notification_id, data)
         )
 
-    if ChannelChoices.SMS.value in data["channels"]:
+    if ChannelChoices.SMS.value in data["channels"] and recipient.phone:
         tasks.append(
             send_sms.s(broadcast_id, org_id, recipient.id, notification_id, data)
         )
@@ -878,7 +878,7 @@ def route_basic_notification(broadcast_id, org_id, notification_id, recipient, d
         persist_notification_delivery(
             notification_id,
             channel=ChannelChoices.SMS,
-            status="failed",
+            status="not_sent",
             error_reason="No phone provided for user",
         )
     if ChannelChoices.EMAIL.value in data["channels"]:

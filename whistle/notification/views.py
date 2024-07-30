@@ -10,6 +10,7 @@ from rest_framework import mixins, status
 from rest_framework.exceptions import ValidationError
 from rest_framework.generics import CreateAPIView
 from rest_framework.permissions import AllowAny
+from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
 
 from external_user.models import ExternalUser
@@ -31,7 +32,6 @@ from .tasks import send_broadcast
 
 class NotificationViewSet(
     mixins.ListModelMixin,
-    mixins.UpdateModelMixin,
     mixins.RetrieveModelMixin,
     GenericViewSet,
 ):
@@ -110,6 +110,7 @@ class BroadcastViewSet(
     CreateAPIView,
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
+    mixins.DestroyModelMixin,
     GenericViewSet,
 ):
     queryset = Broadcast.objects.all()
@@ -139,19 +140,17 @@ class BroadcastViewSet(
         )
 
     @transaction.atomic()
-    def delete(self, request, *args, **kwargs):
-        broadcast = Broadcast.objects.get(kwargs.get(self.lookup_field))
-        if broadcast.schedule_at and broadcast.status == "scheduled":
-            key = f"redbeat:broadcast_{broadcast.id}"
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if instance.schedule_at and instance.status == "scheduled":
+            key = f"redbeat:broadcast_{instance.id}"
             entry = RedBeatScheduler(app=app).Entry.from_key(key=key, app=app)
             entry.delete()
-            broadcast.delete()
-            return JsonResponse(
-                {"status": "success"}, status=status.HTTP_204_NO_CONTENT
-            )
+            super().perform_destroy(instance)
+            return Response(status=status.HTTP_204_NO_CONTENT)
         else:
             raise ValidationError(
-                "Broadcast has already been delivered and cannot be deleted."
+                "The broadcast cannot be deleted because it has already been processed or is not scheduled."
             )
 
     def queue_broadcast(self, broadcast, serializer):

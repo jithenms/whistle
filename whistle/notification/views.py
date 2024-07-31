@@ -158,11 +158,14 @@ class BroadcastViewSet(
 
     def queue_broadcast(self, broadcast, serializer):
         try:
+            redacted_data = serializer.validated_data.copy()
+            redacted_data.update({"recipients": "***"})
+            redacted_data.update({"merge_tags": "***"})
             send_broadcast.s(
                 str(broadcast.id),
                 str(self.request.user.id),
                 data=serializer.validated_data,
-            ).set(kwargsrepr=repr({"data": "***"})).apply_async()
+            ).set(kwargsrepr=repr({"data": redacted_data})).apply_async()
             logging.info(
                 "Broadcast queued with id: %s for org: %s",
                 broadcast.id,

@@ -65,6 +65,10 @@ def send_broadcast(self, broadcast_id, org_id, data):
     broadcast_id = uuid.UUID(broadcast_id)
     org_id = uuid.UUID(org_id)
 
+    redacted_data = data.copy()
+    redacted_data.update({"recipients": "***"})
+    redacted_data.update({"merge_tags": "***"})
+
     if "audience_id" in data:
         audience = Audience.objects.prefetch_related("filters").filter(
             organization_id=org_id, id=data["audience_id"]
@@ -82,7 +86,7 @@ def send_broadcast(self, broadcast_id, org_id, data):
             tasks.append(
                 send_recipient.s(
                     broadcast_id, org_id, recipient.id, notification.id, data=data
-                ).set(kwargsrepr=repr({"data": "***"}))
+                ).set(kwargsrepr=repr({"data": redacted_data}))
             )
             recipient_ids.add(recipient.id)
 
@@ -103,22 +107,24 @@ def send_broadcast(self, broadcast_id, org_id, data):
                             recipient_entity.id,
                             notification.id,
                             data=data,
-                        ).set(kwargsrepr=repr({"data": "***"}))
+                        ).set(kwargsrepr=repr({"data": redacted_data}))
                     )
                     recipient_ids.add(recipient_entity.id)
 
     if "topic" in data:
-        subscribers = ExternalUserSubscription.objects.filter(
+        subscribers = ExternalUserSubscription.objects.select_related("user").filter(
             organization_id=org_id, topic=data["topic"]
         )
 
         for subscriber in subscribers.iterator():
             if subscriber.id not in recipient_ids:
-                notification = persist_notification(org_id, broadcast_id, subscriber.id)
+                notification = persist_notification(
+                    org_id, broadcast_id, subscriber.user.id
+                )
                 tasks.append(
                     send_subscriber.s(
                         broadcast_id, org_id, subscriber.id, notification.id, data=data
-                    ).set(kwargsrepr=repr({"data": "***"}))
+                    ).set(kwargsrepr=repr({"data": redacted_data}))
                 )
                 recipient_ids.add(subscriber.id)
 
@@ -267,7 +273,6 @@ def send_in_app(self, broadcast_id, org_id, user_id, notification_id, data):
         action_link,
         channel=ChannelChoices.IN_APP,
         status="sent",
-        sent_at=datetime.now(timezone.utc),
     )
 
     return
@@ -392,7 +397,6 @@ def handle_apns(apns, broadcast_id, data, device, notification_id, user_id):
             data.get("action_link"),
             channel=ChannelChoices.PUSH,
             status="sent",
-            sent_at=datetime.now(timezone.utc),
             metadata={"platform": PlatformChoices.IOS.value},
         )
 
@@ -510,8 +514,8 @@ def handle_twilio(broadcast_id, data, notification_id, provider, user_id, phone)
         reason = f"{error.status}: {error.msg}"
         persist_notification_delivery(
             notification_id,
-            None,
-            None,
+            title,
+            content,
             data.get("action_link"),
             channel=ChannelChoices.SMS,
             status="failed",
@@ -585,8 +589,8 @@ def handle_sendgrid(broadcast_id, data, notification_id, provider, user_id, emai
 
         persist_notification_delivery(
             notification_id,
-            None,
-            None,
+            None if template_id else title,
+            None if template_id else content,
             data.get("action_link"),
             channel=ChannelChoices.EMAIL,
             status="failed",
@@ -608,7 +612,6 @@ def handle_sendgrid(broadcast_id, data, notification_id, provider, user_id, emai
         data.get("action_link"),
         channel=ChannelChoices.EMAIL,
         status="sent",
-        sent_at=datetime.now(timezone.utc),
         metadata={
             "sg_x_message_id": response.headers["X-Message-ID"],
             "sg_template_id": template_id,
@@ -643,6 +646,7 @@ def persist_notification_delivery(
         title=title,
         content=content,
         action_link=action_link,
+        sent_at=datetime.now(timezone.utc),
         **kwargs,
     )
 
@@ -717,13 +721,18 @@ def route_notification_with_preference(
 ):
     tasks = []
 
+    redacted_data = data.copy()
+    redacted_data.update({"recipients": "***"})
+    redacted_data.update({"merge_tags": "***"})
+
     if ChannelChoices.IN_APP.value in data["channels"]:
         web_preference_entity = channels.get(slug=ChannelChoices.IN_APP.value)
         if web_preference_entity.enabled:
+
             tasks.append(
                 send_in_app.s(
                     broadcast_id, org_id, recipient.id, notification_id, data=data
-                ).set(kwargsrepr=repr({"data": "***"}))
+                ).set(kwargsrepr=repr({"data": redacted_data}))
             )
         else:
             logging.info(
@@ -754,7 +763,7 @@ def route_notification_with_preference(
                     notification_id,
                     data=data,
                     phone=recipient.phone,
-                ).set(kwargsrepr=repr({"data": "***", "phone": "***"}))
+                ).set(kwargsrepr=repr({"data": redacted_data, "phone": "***"}))
             )
         elif sms_preference_entity.enabled and not recipient.phone:
             logging.warning(
@@ -795,7 +804,7 @@ def route_notification_with_preference(
                     notification_id,
                     data=data,
                     email=recipient.email,
-                ).set(kwargsrepr=repr({"data": "***", "email": "***"}))
+                ).set(kwargsrepr=repr({"data": redacted_data, "email": "***"}))
             )
         else:
             logging.info(
@@ -842,11 +851,15 @@ def route_notification_with_preference(
 def route_basic_notification(broadcast_id, org_id, notification_id, recipient, data):
     tasks = []
 
+    redacted_data = data.copy()
+    redacted_data.update({"recipients": "***"})
+    redacted_data.update({"merge_tags": "***"})
+
     if ChannelChoices.IN_APP.value in data["channels"]:
         tasks.append(
             send_in_app.s(
                 broadcast_id, org_id, recipient.id, notification_id, data=data
-            ).set(kwargsrepr=repr({"data": "***"}))
+            ).set(kwargsrepr=repr({"data": redacted_data}))
         )
 
     if ChannelChoices.SMS.value in data["channels"] and recipient.phone:
@@ -858,7 +871,7 @@ def route_basic_notification(broadcast_id, org_id, notification_id, recipient, d
                 notification_id,
                 data=data,
                 phone=recipient.phone,
-            ).set(kwargsrepr=repr({"data": "***", "phone": "***"}))
+            ).set(kwargsrepr=repr({"data": redacted_data, "phone": "***"}))
         )
     elif ChannelChoices.SMS.value in data["channels"] and not recipient.phone:
         logging.warning(
@@ -882,7 +895,7 @@ def route_basic_notification(broadcast_id, org_id, notification_id, recipient, d
                 notification_id,
                 data=data,
                 email=recipient.email,
-            ).set(kwargsrepr=repr({"data": "***", "email": "***"}))
+            ).set(kwargsrepr=repr({"data": redacted_data, "email": "***"}))
         )
     if ChannelChoices.PUSH.value in data["channels"]:
         tasks.append(

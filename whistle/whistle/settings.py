@@ -188,25 +188,51 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
-CELERY_TASK_TRACK_STARTED = True
 CELERY_ACKS_LATE = True
-CELERYBEAT_SCHEDULER = "redbeat.RedBeatScheduler"
-
 CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://127.0.0.1:6379/0")
 CELERY_RESULT_BACKEND = os.environ.get(
     "CELERY_RESULT_BACKEND", "redis://127.0.0.1:6379/0"
 )
+CELERY_TASK_STORE_ERRORS_EVEN_IF_IGNORED = True
+CELERY_ROUTES = (
+    [
+        (
+            (
+                "notification.tasks.send_broadcast",
+                "notification.tasks.send_broadcast_callback",
+            ),
+            {"queue": "broadcasts"},
+        ),
+        (
+            (
+                "notification.tasks.send_recipient",
+                "notification.tasks.send_subscriber",
+                "notification.tasks.send_recipient_callback",
+            ),
+            {"queue": "recipients"},
+        ),
+        (
+            (
+                "notification.tasks.send_email",
+                "notification.tasks.send_sms",
+                "notification.tasks.send_push",
+                "notification.tasks.send_in_app",
+            ),
+            {"queue": "deliveries"},
+        ),
+    ],
+)
 
+CELERYBEAT_SCHEDULER = "redbeat.RedBeatScheduler"
 CELERY_BEAT_MAX_LOOP_INTERVAL = 5
-
 REDBEAT_LOCK_TIMEOUT = CELERY_BEAT_MAX_LOOP_INTERVAL + 60
-
 REDBEAT_REDIS_URL = os.environ.get("REDBEAT_REDIS_URL", "redis://127.0.0.1:6379/0")
 
 JWKS_ENDPOINT_URL = os.getenv("JWKS_ENDPOINT_URL")
-USE_SENDGRID_SANDBOX = bool(os.getenv("USE_SENDGRID_SANDBOX", 0))
 
 KMS_PERSONAL_DATA_KEY_ARN = os.environ["KMS_PERSONAL_DATA_KEY_ARN"]
 KMS_API_CREDENTIALS_KEY_ARN = os.environ["KMS_API_CREDENTIALS_KEY_ARN"]
 KMS_CACHE_CAPACITY = os.getenv("KMS_CACHE_CAPACITY", 100)
 KMS_CACHE_EXPIRY = os.getenv("KMS_CACHE_EXPIRY", 1800.0)
+
+USE_SENDGRID_SANDBOX = bool(os.getenv("USE_SENDGRID_SANDBOX", 0))

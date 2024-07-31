@@ -56,9 +56,9 @@ basic_fields = {
 }
 
 
-@app.task
+@app.task(bind=True, ignore_result=True, queue="broadcasts")
 @transaction.atomic
-def send_broadcast(broadcast_id, org_id, data):
+def send_broadcast(self, broadcast_id, org_id, data):
     tasks = []
     recipient_ids = set()
 
@@ -80,7 +80,7 @@ def send_broadcast(broadcast_id, org_id, data):
         for recipient in recipients.iterator():
             notification = persist_notification(org_id, broadcast_id, recipient.id)
             tasks.append(
-                handle_recipient.s(
+                send_recipient.s(
                     broadcast_id, org_id, recipient.id, notification.id, data
                 )
             )
@@ -97,7 +97,7 @@ def send_broadcast(broadcast_id, org_id, data):
                         org_id, broadcast_id, recipient_entity.id
                     )
                     tasks.append(
-                        handle_recipient.s(
+                        send_recipient.s(
                             broadcast_id,
                             org_id,
                             recipient_entity.id,
@@ -116,7 +116,7 @@ def send_broadcast(broadcast_id, org_id, data):
             if subscriber.id not in recipient_ids:
                 notification = persist_notification(org_id, broadcast_id, subscriber.id)
                 tasks.append(
-                    handle_topic_subscriber.s(
+                    send_subscriber.s(
                         broadcast_id, org_id, subscriber.id, notification.id, data
                     )
                 )
@@ -128,53 +128,14 @@ def send_broadcast(broadcast_id, org_id, data):
         )
         entry.delete()
 
-    result = chord(tasks)(update_broadcast_status.s(broadcast_id, "processed"))
+    chord(tasks)(send_broadcast_callback.si(broadcast_id, "processed"))
 
-    return broadcast_id
-
-
-def build_filter_kwargs(filters):
-    query_kwargs = {}
-    for filter_rec in filters:
-        filter_rec.property = filter_rec.property.replace(".", "__")
-        if filter_rec.property in basic_fields:
-            filter_rec.property = f"{filter_rec.property}_hash"
-            filter_rec.value = utils.perform_hash(filter_rec.value)
-        match filter_rec.operator:
-            case OperatorChoices.EQ:
-                query_kwargs[filter_rec.property] = filter_rec.value
-            case OperatorChoices.GT:
-                query_kwargs[f"{filter_rec.property}__gt"] = filter_rec.value
-            case OperatorChoices.LT:
-                query_kwargs[f"{filter_rec.property}__lt"] = filter_rec.value
-            case OperatorChoices.GTE:
-                query_kwargs[f"{filter_rec.property}__gte"] = filter_rec.value
-            case OperatorChoices.LTE:
-                query_kwargs[f"{filter_rec.property}__lte"] = filter_rec.value
-            case OperatorChoices.CONTAINS:
-                query_kwargs[f"{filter_rec.property}__contains"] = filter_rec.value
-            case _:
-                continue
-    return query_kwargs
+    return
 
 
-def build_exclude_kwargs(filters):
-    query_kwargs = {}
-    for filter_rec in filters:
-        filter_rec.property = filter_rec.property.replace(".", "__")
-        match filter_rec.operator:
-            case OperatorChoices.NEQ:
-                query_kwargs[filter_rec.property] = filter_rec.value
-            case OperatorChoices.DOES_NOT_CONTAIN.value:
-                query_kwargs[f"{filter_rec.property}__contains"] = filter_rec.value
-            case _:
-                continue
-    return query_kwargs
-
-
-@app.task
+@app.task(bind=True, ignore_result=True, queue="recipients")
 @transaction.atomic
-def handle_recipient(broadcast_id, org_id, recipient_id, notification_id, data):
+def send_recipient(self, broadcast_id, org_id, recipient_id, notification_id, data):
     recipient = ExternalUser.objects.get(pk=recipient_id)
 
     if "category" in data:
@@ -191,20 +152,20 @@ def handle_recipient(broadcast_id, org_id, recipient_id, notification_id, data):
                 preference.first().channels.all(),
                 data,
             )
-            return recipient.id
+            return
         else:
             route_basic_notification(
                 broadcast_id, org_id, notification_id, recipient, data
             )
-            return recipient.id
+            return
     else:
         route_basic_notification(broadcast_id, org_id, notification_id, recipient, data)
-        return recipient.id
+        return
 
 
-@app.task
+@app.task(bind=True, ignore_result=True, queue="recipients")
 @transaction.atomic
-def handle_topic_subscriber(broadcast_id, org_id, subscriber_id, notification_id, data):
+def send_subscriber(self, broadcast_id, org_id, subscriber_id, notification_id, data):
     subscriber = ExternalUserSubscription.objects.get(pk=subscriber_id)
 
     if "category" in data:
@@ -223,22 +184,22 @@ def handle_topic_subscriber(broadcast_id, org_id, subscriber_id, notification_id
                 preference.first().channels.all(),
                 data,
             )
-            return subscriber.id
+            return
         elif subscriber_category and subscriber_category.first().enabled:
             route_basic_notification(
                 broadcast_id, org_id, notification_id, subscriber.user, data
             )
-            return subscriber.id
+            return
     else:
         route_basic_notification(
             broadcast_id, org_id, notification_id, subscriber.user, data
         )
-        return subscriber.id
+        return
 
 
-@app.task
+@app.task(bind=True, ignore_result=True, queue="deliveries")
 @transaction.atomic
-def send_sms(broadcast_id, org_id, user_id, notification_id, data):
+def send_sms(self, broadcast_id, org_id, user_id, notification_id, data):
     user = ExternalUser.objects.get(id=user_id)
     providers = Provider.objects.prefetch_related("credentials").filter(
         organization_id=org_id, provider_type=ProviderTypeChoices.SMS
@@ -250,12 +211,12 @@ def send_sms(broadcast_id, org_id, user_id, notification_id, data):
                 handle_twilio(broadcast_id, data, notification_id, provider, user)
             case _:
                 continue
-    return user_id
+    return
 
 
-@app.task
+@app.task(bind=True, ignore_result=True, queue="deliveries")
 @transaction.atomic
-def send_email(broadcast_id, org_id, user_id, notification_id, data):
+def send_email(self, broadcast_id, org_id, user_id, notification_id, data):
     user = ExternalUser.objects.get(id=user_id)
     providers = Provider.objects.prefetch_related("credentials").filter(
         organization_id=org_id, provider_type=ProviderTypeChoices.EMAIL
@@ -267,12 +228,12 @@ def send_email(broadcast_id, org_id, user_id, notification_id, data):
                 handle_sendgrid(broadcast_id, data, notification_id, provider, user)
             case _:
                 continue
-    return user_id
+    return
 
 
-@app.task
+@app.task(bind=True, ignore_result=True, queue="deliveries")
 @transaction.atomic
-def send_in_app(broadcast_id, org_id, user_id, notification_id, data):
+def send_in_app(self, broadcast_id, org_id, user_id, notification_id, data):
     title = data["title"]
     content = data["content"]
     action_link = data.get("action_link")
@@ -305,12 +266,12 @@ def send_in_app(broadcast_id, org_id, user_id, notification_id, data):
         sent_at=datetime.now(timezone.utc),
     )
 
-    return user_id
+    return
 
 
-@app.task
+@app.task(bind=True, ignore_result=True, queue="deliveries")
 @transaction.atomic
-def send_push(broadcast_id, org_id, user_id, notification_id, data):
+def send_push(self, broadcast_id, org_id, user_id, notification_id, data):
     devices = ExternalUserDevice.objects.filter(user_id=user_id)
 
     apns = Provider.objects.prefetch_related("credentials").filter(
@@ -353,25 +314,25 @@ def send_push(broadcast_id, org_id, user_id, notification_id, data):
                     )
             case _:
                 continue
-    return user_id
+    return
 
 
-@app.task
+@app.task(bind=True, ignore_result=True, queue="broadcasts")
 @transaction.atomic
-def update_broadcast_status(_, broadcast_id, status):
+def send_broadcast_callback(self, broadcast_id, status):
     broadcast = Broadcast.objects.get(pk=broadcast_id)
     broadcast.status = status
     broadcast.save()
-    return broadcast_id
+    return
 
 
-@app.task
+@app.task(bind=True, ignore_result=True, queue="recipients")
 @transaction.atomic
-def add_broadcast_recipient(_, broadcast_id, recipient_id):
+def send_recipient_callback(self, broadcast_id, recipient_id):
     BroadcastRecipient.objects.create(
         broadcast_id=broadcast_id, recipient_id=recipient_id
     )
-    return recipient_id
+    return
 
 
 @transaction.atomic
@@ -850,9 +811,9 @@ def route_notification_with_preference(
                 error_reason="User disabled",
             )
 
-    result = chord(tasks)(add_broadcast_recipient.s(broadcast_id, recipient.id))
+    chord(tasks)(send_recipient_callback.si(broadcast_id, recipient.id))
 
-    return result.id
+    return
 
 
 @transaction.atomic
@@ -890,6 +851,45 @@ def route_basic_notification(broadcast_id, org_id, notification_id, recipient, d
             send_push.s(broadcast_id, org_id, recipient.id, notification_id, data)
         )
 
-    result = chord(tasks)(add_broadcast_recipient.s(broadcast_id, recipient.id))
+    chord(tasks)(send_recipient_callback.si(broadcast_id, recipient.id))
 
-    return result.id
+    return
+
+
+def build_filter_kwargs(filters):
+    query_kwargs = {}
+    for filter_rec in filters:
+        filter_rec.property = filter_rec.property.replace(".", "__")
+        if filter_rec.property in basic_fields:
+            filter_rec.property = f"{filter_rec.property}_hash"
+            filter_rec.value = utils.perform_hash(filter_rec.value)
+        match filter_rec.operator:
+            case OperatorChoices.EQ:
+                query_kwargs[filter_rec.property] = filter_rec.value
+            case OperatorChoices.GT:
+                query_kwargs[f"{filter_rec.property}__gt"] = filter_rec.value
+            case OperatorChoices.LT:
+                query_kwargs[f"{filter_rec.property}__lt"] = filter_rec.value
+            case OperatorChoices.GTE:
+                query_kwargs[f"{filter_rec.property}__gte"] = filter_rec.value
+            case OperatorChoices.LTE:
+                query_kwargs[f"{filter_rec.property}__lte"] = filter_rec.value
+            case OperatorChoices.CONTAINS:
+                query_kwargs[f"{filter_rec.property}__contains"] = filter_rec.value
+            case _:
+                continue
+    return query_kwargs
+
+
+def build_exclude_kwargs(filters):
+    query_kwargs = {}
+    for filter_rec in filters:
+        filter_rec.property = filter_rec.property.replace(".", "__")
+        match filter_rec.operator:
+            case OperatorChoices.NEQ:
+                query_kwargs[filter_rec.property] = filter_rec.value
+            case OperatorChoices.DOES_NOT_CONTAIN.value:
+                query_kwargs[f"{filter_rec.property}__contains"] = filter_rec.value
+            case _:
+                continue
+    return query_kwargs

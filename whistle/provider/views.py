@@ -1,6 +1,6 @@
 from rest_framework.viewsets import ModelViewSet
 
-from provider.models import Provider
+from provider.models import Provider, ProviderChoices
 from provider.serializers import (
     TwilioSerializer,
     SendgridSerializer,
@@ -16,7 +16,9 @@ class SendgridViewSet(ModelViewSet):
     authentication_classes = [ServerAuth]
 
     def get_queryset(self):
-        return self.queryset.filter(organization=self.request.user)
+        return self.queryset.filter(
+            organization=self.request.user, provider=ProviderChoices.SENDGRID
+        )
 
 
 class TwilioViewSet(ModelViewSet):
@@ -25,7 +27,9 @@ class TwilioViewSet(ModelViewSet):
     authentication_classes = [ServerAuth]
 
     def get_queryset(self):
-        return self.queryset.filter(organization=self.request.user)
+        return self.queryset.filter(
+            organization=self.request.user, provider=ProviderChoices.TWILIO
+        )
 
 
 class APNSViewSet(ModelViewSet):
@@ -34,7 +38,9 @@ class APNSViewSet(ModelViewSet):
     authentication_classes = [ServerAuth]
 
     def get_queryset(self):
-        return self.queryset.filter(organization=self.request.user)
+        return self.queryset.filter(
+            organization=self.request.user, provider=ProviderChoices.APNS
+        )
 
 
 class FCMViewSet(ModelViewSet):
@@ -43,4 +49,6 @@ class FCMViewSet(ModelViewSet):
     authentication_classes = [ServerAuth]
 
     def get_queryset(self):
-        return self.queryset.filter(organization=self.request.user)
+        return self.queryset.filter(
+            organization=self.request.user, provider=ProviderChoices.FCM
+        )

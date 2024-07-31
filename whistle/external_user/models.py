@@ -51,6 +51,5 @@ class PlatformChoices(models.TextChoices):
 class ExternalUserDevice(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(ExternalUser, on_delete=models.CASCADE)
-    bundle_id = models.CharField(unique=True, null=True)
     token = models.CharField(unique=True)
     platform = models.CharField(choices=PlatformChoices.choices)

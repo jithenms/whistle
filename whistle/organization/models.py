@@ -8,7 +8,7 @@ from whistle import fields, utils, settings
 
 class Organization(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    clerk_org_id = models.TextField(unique=True)
+    clerk_org_id = models.CharField(unique=True)
     name = models.CharField()
     slug = models.SlugField(unique=True)
 
@@ -19,12 +19,12 @@ class OrganizationCredentials(models.Model):
     )
 
     api_key = fields.EncryptedField(key_id=settings.KMS_PERSONAL_DATA_KEY_ARN)
-    api_key_hash = models.TextField(unique=True)
+    api_key_hash = models.CharField(unique=True)
 
     api_secret = fields.EncryptedField(key_id=settings.KMS_PERSONAL_DATA_KEY_ARN)
-    api_secret_hash = models.TextField(unique=True)
+    api_secret_hash = models.CharField(unique=True)
 
-    api_secret_salt = models.TextField(unique=True)
+    api_secret_salt = models.CharField(unique=True)
 
     def save(self, *args, **kwargs):
         if self.api_key:

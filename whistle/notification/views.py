@@ -133,9 +133,12 @@ class BroadcastViewSet(
             self.schedule_broadcast(instance, serializer)
         else:
             self.queue_broadcast(instance, serializer)
-        response_data = serializer.validated_data
         return JsonResponse(
-            {**response_data, "status": instance.status},
+            data={
+                "id": instance.id,
+                **serializer.validated_data,
+                "status": instance.status,
+            },
             status=status.HTTP_200_OK,
         )
 
@@ -155,18 +158,27 @@ class BroadcastViewSet(
 
     def queue_broadcast(self, broadcast, serializer):
         try:
-            send_broadcast.delay(
+            redacted_data = serializer.validated_data.copy()
+            redacted_data.update({"recipients": "***"})
+            redacted_data.update({"merge_tags": "***"})
+            send_broadcast.s(
                 str(broadcast.id),
                 str(self.request.user.id),
-                serializer.validated_data,
-            )
+                data=serializer.validated_data,
+            ).set(kwargsrepr=repr({"data": redacted_data})).apply_async()
             logging.info(
                 "Broadcast queued with id: %s for org: %s",
                 broadcast.id,
                 self.request.user.id,
             )
+            return
         except Exception as error:
-            logging.debug(error)
+            logging.error(
+                "Failed to queue broadcast: %s in org: %s with error: %s",
+                broadcast.id,
+                self.request.user.id,
+                error,
+            )
             broadcast.status = "failed"
             broadcast.save()
             logging.info(
@@ -174,6 +186,7 @@ class BroadcastViewSet(
                 broadcast.id,
                 self.request.user.id,
             )
+            raise
 
     def schedule_broadcast(self, broadcast, serializer):
         try:
@@ -202,6 +215,7 @@ class BroadcastViewSet(
                 broadcast.id,
                 self.request.user.id,
             )
+            return
         except Exception as error:
             broadcast.status = "failed"
             broadcast.save()

@@ -56,14 +56,18 @@ basic_fields = {
 }
 
 
-@app.task
+@app.task(bind=True, ignore_result=True, queue="broadcasts")
 @transaction.atomic
-def send_broadcast(broadcast_id, org_id, data):
+def send_broadcast(self, broadcast_id, org_id, data):
     tasks = []
     recipient_ids = set()
 
     broadcast_id = uuid.UUID(broadcast_id)
     org_id = uuid.UUID(org_id)
+
+    redacted_data = data.copy()
+    redacted_data.update({"recipients": "***"})
+    redacted_data.update({"merge_tags": "***"})
 
     if "audience_id" in data:
         audience = Audience.objects.prefetch_related("filters").filter(
@@ -80,9 +84,9 @@ def send_broadcast(broadcast_id, org_id, data):
         for recipient in recipients.iterator():
             notification = persist_notification(org_id, broadcast_id, recipient.id)
             tasks.append(
-                handle_recipient.s(
-                    broadcast_id, org_id, recipient.id, notification.id, data
-                )
+                send_recipient.s(
+                    broadcast_id, org_id, recipient.id, notification.id, data=data
+                ).set(kwargsrepr=repr({"data": redacted_data}))
             )
             recipient_ids.add(recipient.id)
 
@@ -97,28 +101,30 @@ def send_broadcast(broadcast_id, org_id, data):
                         org_id, broadcast_id, recipient_entity.id
                     )
                     tasks.append(
-                        handle_recipient.s(
+                        send_recipient.s(
                             broadcast_id,
                             org_id,
                             recipient_entity.id,
                             notification.id,
-                            data,
-                        )
+                            data=data,
+                        ).set(kwargsrepr=repr({"data": redacted_data}))
                     )
                     recipient_ids.add(recipient_entity.id)
 
     if "topic" in data:
-        subscribers = ExternalUserSubscription.objects.filter(
+        subscribers = ExternalUserSubscription.objects.select_related("user").filter(
             organization_id=org_id, topic=data["topic"]
         )
 
         for subscriber in subscribers.iterator():
             if subscriber.id not in recipient_ids:
-                notification = persist_notification(org_id, broadcast_id, subscriber.id)
+                notification = persist_notification(
+                    org_id, broadcast_id, subscriber.user.id
+                )
                 tasks.append(
-                    handle_topic_subscriber.s(
-                        broadcast_id, org_id, subscriber.id, notification.id, data
-                    )
+                    send_subscriber.s(
+                        broadcast_id, org_id, subscriber.id, notification.id, data=data
+                    ).set(kwargsrepr=repr({"data": redacted_data}))
                 )
                 recipient_ids.add(subscriber.id)
 
@@ -128,53 +134,14 @@ def send_broadcast(broadcast_id, org_id, data):
         )
         entry.delete()
 
-    result = chord(tasks)(update_broadcast_status.s(broadcast_id, "processed"))
+    chord(tasks)(send_broadcast_callback.si(broadcast_id, "processed"))
 
-    return broadcast_id
-
-
-def build_filter_kwargs(filters):
-    query_kwargs = {}
-    for filter_rec in filters:
-        filter_rec.property = filter_rec.property.replace(".", "__")
-        if filter_rec.property in basic_fields:
-            filter_rec.property = f"{filter_rec.property}_hash"
-            filter_rec.value = utils.perform_hash(filter_rec.value)
-        match filter_rec.operator:
-            case OperatorChoices.EQ:
-                query_kwargs[filter_rec.property] = filter_rec.value
-            case OperatorChoices.GT:
-                query_kwargs[f"{filter_rec.property}__gt"] = filter_rec.value
-            case OperatorChoices.LT:
-                query_kwargs[f"{filter_rec.property}__lt"] = filter_rec.value
-            case OperatorChoices.GTE:
-                query_kwargs[f"{filter_rec.property}__gte"] = filter_rec.value
-            case OperatorChoices.LTE:
-                query_kwargs[f"{filter_rec.property}__lte"] = filter_rec.value
-            case OperatorChoices.CONTAINS:
-                query_kwargs[f"{filter_rec.property}__contains"] = filter_rec.value
-            case _:
-                continue
-    return query_kwargs
+    return
 
 
-def build_exclude_kwargs(filters):
-    query_kwargs = {}
-    for filter_rec in filters:
-        filter_rec.property = filter_rec.property.replace(".", "__")
-        match filter_rec.operator:
-            case OperatorChoices.NEQ:
-                query_kwargs[filter_rec.property] = filter_rec.value
-            case OperatorChoices.DOES_NOT_CONTAIN.value:
-                query_kwargs[f"{filter_rec.property}__contains"] = filter_rec.value
-            case _:
-                continue
-    return query_kwargs
-
-
-@app.task
+@app.task(bind=True, ignore_result=True, queue="recipients")
 @transaction.atomic
-def handle_recipient(broadcast_id, org_id, recipient_id, notification_id, data):
+def send_recipient(self, broadcast_id, org_id, recipient_id, notification_id, data):
     recipient = ExternalUser.objects.get(pk=recipient_id)
 
     if "category" in data:
@@ -191,21 +158,23 @@ def handle_recipient(broadcast_id, org_id, recipient_id, notification_id, data):
                 preference.first().channels.all(),
                 data,
             )
-            return recipient.id
+            return
         else:
             route_basic_notification(
                 broadcast_id, org_id, notification_id, recipient, data
             )
-            return recipient.id
+            return
     else:
         route_basic_notification(broadcast_id, org_id, notification_id, recipient, data)
-        return recipient.id
+        return
 
 
-@app.task
+@app.task(bind=True, ignore_result=True, queue="recipients")
 @transaction.atomic
-def handle_topic_subscriber(broadcast_id, org_id, subscriber_id, notification_id, data):
-    subscriber = ExternalUserSubscription.objects.get(pk=subscriber_id)
+def send_subscriber(self, broadcast_id, org_id, subscriber_id, notification_id, data):
+    subscriber = ExternalUserSubscription.objects.select_related("user").get(
+        pk=subscriber_id
+    )
 
     if "category" in data:
         subscriber_category = subscriber.categories.filter(slug=data["category"])
@@ -223,23 +192,22 @@ def handle_topic_subscriber(broadcast_id, org_id, subscriber_id, notification_id
                 preference.first().channels.all(),
                 data,
             )
-            return subscriber.id
+            return
         elif subscriber_category and subscriber_category.first().enabled:
             route_basic_notification(
                 broadcast_id, org_id, notification_id, subscriber.user, data
             )
-            return subscriber.id
+            return
     else:
         route_basic_notification(
             broadcast_id, org_id, notification_id, subscriber.user, data
         )
-        return subscriber.id
+        return
 
 
-@app.task
+@app.task(bind=True, ignore_result=True, queue="deliveries")
 @transaction.atomic
-def send_sms(broadcast_id, org_id, user_id, notification_id, data):
-    user = ExternalUser.objects.get(id=user_id)
+def send_sms(self, broadcast_id, org_id, user_id, notification_id, data, phone):
     providers = Provider.objects.prefetch_related("credentials").filter(
         organization_id=org_id, provider_type=ProviderTypeChoices.SMS
     )
@@ -247,16 +215,17 @@ def send_sms(broadcast_id, org_id, user_id, notification_id, data):
     for provider in providers.all():
         match provider.provider:
             case ProviderChoices.TWILIO.value:
-                handle_twilio(broadcast_id, data, notification_id, provider, user)
+                handle_twilio(
+                    broadcast_id, data, notification_id, provider, user_id, phone
+                )
             case _:
                 continue
-    return user_id
+    return
 
 
-@app.task
+@app.task(bind=True, ignore_result=True, queue="deliveries")
 @transaction.atomic
-def send_email(broadcast_id, org_id, user_id, notification_id, data):
-    user = ExternalUser.objects.get(id=user_id)
+def send_email(self, broadcast_id, org_id, user_id, notification_id, data, email):
     providers = Provider.objects.prefetch_related("credentials").filter(
         organization_id=org_id, provider_type=ProviderTypeChoices.EMAIL
     )
@@ -264,15 +233,17 @@ def send_email(broadcast_id, org_id, user_id, notification_id, data):
     for provider in providers.all():
         match provider.provider:
             case ProviderChoices.SENDGRID.value:
-                handle_sendgrid(broadcast_id, data, notification_id, provider, user)
+                handle_sendgrid(
+                    broadcast_id, data, notification_id, provider, user_id, email
+                )
             case _:
                 continue
-    return user_id
+    return
 
 
-@app.task
+@app.task(bind=True, ignore_result=True, queue="deliveries")
 @transaction.atomic
-def send_in_app(broadcast_id, org_id, user_id, notification_id, data):
+def send_in_app(self, broadcast_id, org_id, user_id, notification_id, data):
     title = data["title"]
     content = data["content"]
     action_link = data.get("action_link")
@@ -302,15 +273,14 @@ def send_in_app(broadcast_id, org_id, user_id, notification_id, data):
         action_link,
         channel=ChannelChoices.IN_APP,
         status="sent",
-        sent_at=datetime.now(timezone.utc),
     )
 
-    return user_id
+    return
 
 
-@app.task
+@app.task(bind=True, ignore_result=True, queue="deliveries")
 @transaction.atomic
-def send_push(broadcast_id, org_id, user_id, notification_id, data):
+def send_push(self, broadcast_id, org_id, user_id, notification_id, data):
     devices = ExternalUserDevice.objects.filter(user_id=user_id)
 
     apns = Provider.objects.prefetch_related("credentials").filter(
@@ -353,25 +323,25 @@ def send_push(broadcast_id, org_id, user_id, notification_id, data):
                     )
             case _:
                 continue
-    return user_id
+    return
 
 
-@app.task
+@app.task(bind=True, ignore_result=True, queue="broadcasts")
 @transaction.atomic
-def update_broadcast_status(_, broadcast_id, status):
+def send_broadcast_callback(self, broadcast_id, status):
     broadcast = Broadcast.objects.get(pk=broadcast_id)
     broadcast.status = status
     broadcast.save()
-    return broadcast_id
+    return
 
 
-@app.task
+@app.task(bind=True, ignore_result=True, queue="recipients")
 @transaction.atomic
-def add_broadcast_recipient(_, broadcast_id, recipient_id):
+def send_recipient_callback(self, broadcast_id, recipient_id):
     BroadcastRecipient.objects.create(
         broadcast_id=broadcast_id, recipient_id=recipient_id
     )
-    return recipient_id
+    return
 
 
 @transaction.atomic
@@ -427,7 +397,6 @@ def handle_apns(apns, broadcast_id, data, device, notification_id, user_id):
             data.get("action_link"),
             channel=ChannelChoices.PUSH,
             status="sent",
-            sent_at=datetime.now(timezone.utc),
             metadata={"platform": PlatformChoices.IOS.value},
         )
 
@@ -516,7 +485,7 @@ def handle_fcm(data, device, fcm, notification_id, user_id):
 
 
 @transaction.atomic
-def handle_twilio(broadcast_id, data, notification_id, provider, user):
+def handle_twilio(broadcast_id, data, notification_id, provider, user_id, phone):
     credentials_dict = {
         credential.slug: credential.value for credential in provider.credentials.all()
     }
@@ -530,14 +499,14 @@ def handle_twilio(broadcast_id, data, notification_id, provider, user):
     )
     try:
         message = twilio_client.messages.create(
-            to=user.phone,
+            to=phone,
             from_=credentials_dict["from_phone"],
             body=body,
         )
     except TwilioRestException as error:
         logging.error(
             "Twilio failed to send text to user: %s for broadcast: %s with message: ",
-            user.id,
+            user_id,
             broadcast_id,
             error.msg,
         )
@@ -545,8 +514,8 @@ def handle_twilio(broadcast_id, data, notification_id, provider, user):
         reason = f"{error.status}: {error.msg}"
         persist_notification_delivery(
             notification_id,
-            None,
-            None,
+            title,
+            content,
             data.get("action_link"),
             channel=ChannelChoices.SMS,
             status="failed",
@@ -555,7 +524,7 @@ def handle_twilio(broadcast_id, data, notification_id, provider, user):
         return
     logging.info(
         "Sent twilio sms to user: %s for broadcast: %s with status: %s",
-        user.id,
+        user_id,
         broadcast_id,
         message.status,
     )
@@ -580,14 +549,14 @@ def handle_twilio(broadcast_id, data, notification_id, provider, user):
 
 
 @transaction.atomic
-def handle_sendgrid(broadcast_id, data, notification_id, provider, user):
+def handle_sendgrid(broadcast_id, data, notification_id, provider, user_id, email):
     credentials_dict = {
         credential.slug: credential.value for credential in provider.credentials.all()
     }
 
     sg = SendGridAPIClient(api_key=credentials_dict["api_key"])
     from_email = Email(credentials_dict["from_email"])
-    to_email = To(user.email)
+    to_email = To(email)
     mail = Mail(from_email, to_email)
     mail_settings = MailSettings()
     mail_settings.sandbox_mode = SandBoxMode(settings.USE_SENDGRID_SANDBOX)
@@ -613,15 +582,15 @@ def handle_sendgrid(broadcast_id, data, notification_id, provider, user):
     except HTTPError as error:
         logging.error(
             "Sendgrid failed to send email to user: %s for broadcast: %s with reason: ",
-            user.id,
+            user_id,
             broadcast_id,
             error.reason,
         )
 
         persist_notification_delivery(
             notification_id,
-            None,
-            None,
+            None if template_id else title,
+            None if template_id else content,
             data.get("action_link"),
             channel=ChannelChoices.EMAIL,
             status="failed",
@@ -632,7 +601,7 @@ def handle_sendgrid(broadcast_id, data, notification_id, provider, user):
     logging.info(
         "Sendgrid email with status code: %s sent to user: %s with broadcast: %s",
         response.status_code,
-        user.id,
+        user_id,
         broadcast_id,
     )
 
@@ -643,7 +612,6 @@ def handle_sendgrid(broadcast_id, data, notification_id, provider, user):
         data.get("action_link"),
         channel=ChannelChoices.EMAIL,
         status="sent",
-        sent_at=datetime.now(timezone.utc),
         metadata={
             "sg_x_message_id": response.headers["X-Message-ID"],
             "sg_template_id": template_id,
@@ -678,6 +646,7 @@ def persist_notification_delivery(
         title=title,
         content=content,
         action_link=action_link,
+        sent_at=datetime.now(timezone.utc),
         **kwargs,
     )
 
@@ -752,11 +721,18 @@ def route_notification_with_preference(
 ):
     tasks = []
 
+    redacted_data = data.copy()
+    redacted_data.update({"recipients": "***"})
+    redacted_data.update({"merge_tags": "***"})
+
     if ChannelChoices.IN_APP.value in data["channels"]:
         web_preference_entity = channels.get(slug=ChannelChoices.IN_APP.value)
         if web_preference_entity.enabled:
+
             tasks.append(
-                send_in_app.s(broadcast_id, org_id, recipient.id, notification_id, data)
+                send_in_app.s(
+                    broadcast_id, org_id, recipient.id, notification_id, data=data
+                ).set(kwargsrepr=repr({"data": redacted_data}))
             )
         else:
             logging.info(
@@ -779,7 +755,16 @@ def route_notification_with_preference(
     if ChannelChoices.SMS.value in data["channels"]:
         sms_preference_entity = channels.get(slug=ChannelChoices.SMS.value)
         if sms_preference_entity.enabled and recipient.phone:
-            tasks.append(send_sms.s(broadcast_id, org_id, recipient.id, data))
+            tasks.append(
+                send_sms.s(
+                    broadcast_id,
+                    org_id,
+                    recipient.id,
+                    notification_id,
+                    data=data,
+                    phone=recipient.phone,
+                ).set(kwargsrepr=repr({"data": redacted_data, "phone": "***"}))
+            )
         elif sms_preference_entity.enabled and not recipient.phone:
             logging.warning(
                 "Trying to route SMS notification without phone on record for user: %s in org: %s for broadcast: %s",
@@ -812,7 +797,14 @@ def route_notification_with_preference(
         email_preference_entity = channels.get(slug=ChannelChoices.EMAIL.value)
         if email_preference_entity.enabled:
             tasks.append(
-                send_email.s(broadcast_id, org_id, recipient.id, notification_id, data)
+                send_email.s(
+                    broadcast_id,
+                    org_id,
+                    recipient.id,
+                    notification_id,
+                    data=data,
+                    email=recipient.email,
+                ).set(kwargsrepr=repr({"data": redacted_data, "email": "***"}))
             )
         else:
             logging.info(
@@ -850,23 +842,36 @@ def route_notification_with_preference(
                 error_reason="User disabled",
             )
 
-    result = chord(tasks)(add_broadcast_recipient.s(broadcast_id, recipient.id))
+    chord(tasks)(send_recipient_callback.si(broadcast_id, recipient.id))
 
-    return result.id
+    return
 
 
 @transaction.atomic
 def route_basic_notification(broadcast_id, org_id, notification_id, recipient, data):
     tasks = []
 
+    redacted_data = data.copy()
+    redacted_data.update({"recipients": "***"})
+    redacted_data.update({"merge_tags": "***"})
+
     if ChannelChoices.IN_APP.value in data["channels"]:
         tasks.append(
-            send_in_app.s(broadcast_id, org_id, recipient.id, notification_id, data)
+            send_in_app.s(
+                broadcast_id, org_id, recipient.id, notification_id, data=data
+            ).set(kwargsrepr=repr({"data": redacted_data}))
         )
 
     if ChannelChoices.SMS.value in data["channels"] and recipient.phone:
         tasks.append(
-            send_sms.s(broadcast_id, org_id, recipient.id, notification_id, data)
+            send_sms.s(
+                broadcast_id,
+                org_id,
+                recipient.id,
+                notification_id,
+                data=data,
+                phone=recipient.phone,
+            ).set(kwargsrepr=repr({"data": redacted_data, "phone": "***"}))
         )
     elif ChannelChoices.SMS.value in data["channels"] and not recipient.phone:
         logging.warning(
@@ -883,13 +888,59 @@ def route_basic_notification(broadcast_id, org_id, notification_id, recipient, d
         )
     if ChannelChoices.EMAIL.value in data["channels"]:
         tasks.append(
-            send_email.s(broadcast_id, org_id, recipient.id, notification_id, data)
+            send_email.s(
+                broadcast_id,
+                org_id,
+                recipient.id,
+                notification_id,
+                data=data,
+                email=recipient.email,
+            ).set(kwargsrepr=repr({"data": redacted_data, "email": "***"}))
         )
     if ChannelChoices.PUSH.value in data["channels"]:
         tasks.append(
             send_push.s(broadcast_id, org_id, recipient.id, notification_id, data)
         )
 
-    result = chord(tasks)(add_broadcast_recipient.s(broadcast_id, recipient.id))
+    chord(tasks)(send_recipient_callback.si(broadcast_id, recipient.id))
 
-    return result.id
+    return
+
+
+def build_filter_kwargs(filters):
+    query_kwargs = {}
+    for filter_rec in filters:
+        filter_rec.property = filter_rec.property.replace(".", "__")
+        if filter_rec.property in basic_fields:
+            filter_rec.property = f"{filter_rec.property}_hash"
+            filter_rec.value = utils.perform_hash(filter_rec.value)
+        match filter_rec.operator:
+            case OperatorChoices.EQ:
+                query_kwargs[filter_rec.property] = filter_rec.value
+            case OperatorChoices.GT:
+                query_kwargs[f"{filter_rec.property}__gt"] = filter_rec.value
+            case OperatorChoices.LT:
+                query_kwargs[f"{filter_rec.property}__lt"] = filter_rec.value
+            case OperatorChoices.GTE:
+                query_kwargs[f"{filter_rec.property}__gte"] = filter_rec.value
+            case OperatorChoices.LTE:
+                query_kwargs[f"{filter_rec.property}__lte"] = filter_rec.value
+            case OperatorChoices.CONTAINS:
+                query_kwargs[f"{filter_rec.property}__contains"] = filter_rec.value
+            case _:
+                continue
+    return query_kwargs
+
+
+def build_exclude_kwargs(filters):
+    query_kwargs = {}
+    for filter_rec in filters:
+        filter_rec.property = filter_rec.property.replace(".", "__")
+        match filter_rec.operator:
+            case OperatorChoices.NEQ:
+                query_kwargs[filter_rec.property] = filter_rec.value
+            case OperatorChoices.DOES_NOT_CONTAIN.value:
+                query_kwargs[f"{filter_rec.property}__contains"] = filter_rec.value
+            case _:
+                continue
+    return query_kwargs

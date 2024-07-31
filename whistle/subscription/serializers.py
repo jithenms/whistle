@@ -13,7 +13,7 @@ from subscription.models import (
 class ExternalUserSubscriptionCategorySerializer(serializers.ModelSerializer):
     class Meta:
         model = ExternalUserSubscriptionCategory
-        fields = ["id", "slug", "description"]
+        fields = ["slug", "description"]
 
 
 class ExternalUserSubscriptionSerializer(serializers.ModelSerializer):

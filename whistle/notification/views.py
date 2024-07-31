@@ -158,11 +158,11 @@ class BroadcastViewSet(
 
     def queue_broadcast(self, broadcast, serializer):
         try:
-            send_broadcast.delay(
+            send_broadcast.s(
                 str(broadcast.id),
                 str(self.request.user.id),
-                serializer.validated_data,
-            )
+                data=serializer.validated_data,
+            ).set(kwargsrepr=repr({"data": "***"})).apply_async()
             logging.info(
                 "Broadcast queued with id: %s for org: %s",
                 broadcast.id,

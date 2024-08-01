@@ -31,7 +31,7 @@ services:
       context: .
       dockerfile: ./whistle/Dockerfile
     entrypoint: /usr/local/bin/start-worker.sh
-    command: --concurrency=1 --loglevel=DEBUG
+    command: -Q broadcasts,notifications,outbound --concurrency=1 --loglevel=DEBUG
     env_file:
       - ./whistle/whistle/.env
     depends_on:
@@ -48,7 +48,6 @@ services:
       - ./whistle/whistle/.env
     depends_on:
       - redis
-      - worker
       - db
 
   db:
@@ -73,5 +72,4 @@ services:
     ports:
       - 5555:5555
     depends_on:
-      - worker
       - redis

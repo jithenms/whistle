@@ -60,10 +60,11 @@ basic_fields = {
 @transaction.atomic
 def send_broadcast(self, broadcast_id, org_id, data):
     tasks = []
-    recipient_ids = set()
 
     broadcast_id = uuid.UUID(broadcast_id)
     org_id = uuid.UUID(org_id)
+
+    recipient_ids = set()
 
     redacted_data = data.copy()
     redacted_data.update({"recipients": "***"})
@@ -139,7 +140,7 @@ def send_broadcast(self, broadcast_id, org_id, data):
     return
 
 
-@app.task(bind=True, ignore_result=True, queue="recipients")
+@app.task(bind=True, ignore_result=True, queue="notifications")
 @transaction.atomic
 def send_recipient(self, broadcast_id, org_id, recipient_id, notification_id, data):
     recipient = ExternalUser.objects.get(pk=recipient_id)
@@ -169,7 +170,7 @@ def send_recipient(self, broadcast_id, org_id, recipient_id, notification_id, da
         return
 
 
-@app.task(bind=True, ignore_result=True, queue="recipients")
+@app.task(bind=True, ignore_result=True, queue="notifications")
 @transaction.atomic
 def send_subscriber(self, broadcast_id, org_id, subscriber_id, notification_id, data):
     subscriber = ExternalUserSubscription.objects.select_related("user").get(
@@ -205,7 +206,7 @@ def send_subscriber(self, broadcast_id, org_id, subscriber_id, notification_id, 
         return
 
 
-@app.task(bind=True, ignore_result=True, queue="deliveries")
+@app.task(bind=True, ignore_result=True, queue="outbound")
 @transaction.atomic
 def send_sms(self, broadcast_id, org_id, user_id, notification_id, data, phone):
     providers = Provider.objects.prefetch_related("credentials").filter(
@@ -223,7 +224,7 @@ def send_sms(self, broadcast_id, org_id, user_id, notification_id, data, phone):
     return
 
 
-@app.task(bind=True, ignore_result=True, queue="deliveries")
+@app.task(bind=True, ignore_result=True, queue="outbound")
 @transaction.atomic
 def send_email(self, broadcast_id, org_id, user_id, notification_id, data, email):
     providers = Provider.objects.prefetch_related("credentials").filter(
@@ -241,7 +242,7 @@ def send_email(self, broadcast_id, org_id, user_id, notification_id, data, email
     return
 
 
-@app.task(bind=True, ignore_result=True, queue="deliveries")
+@app.task(bind=True, ignore_result=True, queue="outbound")
 @transaction.atomic
 def send_in_app(self, broadcast_id, org_id, user_id, notification_id, data):
     title = data["title"]
@@ -278,7 +279,7 @@ def send_in_app(self, broadcast_id, org_id, user_id, notification_id, data):
     return
 
 
-@app.task(bind=True, ignore_result=True, queue="deliveries")
+@app.task(bind=True, ignore_result=True, queue="outbound")
 @transaction.atomic
 def send_push(self, broadcast_id, org_id, user_id, notification_id, data):
     devices = ExternalUserDevice.objects.filter(user_id=user_id)
@@ -335,7 +336,7 @@ def send_broadcast_callback(self, broadcast_id, status):
     return
 
 
-@app.task(bind=True, ignore_result=True, queue="recipients")
+@app.task(bind=True, ignore_result=True, queue="notifications")
 @transaction.atomic
 def send_recipient_callback(self, broadcast_id, recipient_id):
     BroadcastRecipient.objects.create(
@@ -728,7 +729,6 @@ def route_notification_with_preference(
     if ChannelChoices.IN_APP.value in data["channels"]:
         web_preference_entity = channels.get(slug=ChannelChoices.IN_APP.value)
         if web_preference_entity.enabled:
-
             tasks.append(
                 send_in_app.s(
                     broadcast_id, org_id, recipient.id, notification_id, data=data
@@ -825,7 +825,9 @@ def route_notification_with_preference(
         mobile_preference_entity = channels.get(slug=ChannelChoices.PUSH.value)
         if mobile_preference_entity.enabled:
             tasks.append(
-                send_push.s(broadcast_id, org_id, recipient.id, notification_id, data)
+                send_push.s(
+                    broadcast_id, org_id, recipient.id, notification_id, data
+                ).set(kwargsrepr=repr({"data": redacted_data}))
             )
         else:
             logging.info(
@@ -899,7 +901,9 @@ def route_basic_notification(broadcast_id, org_id, notification_id, recipient, d
         )
     if ChannelChoices.PUSH.value in data["channels"]:
         tasks.append(
-            send_push.s(broadcast_id, org_id, recipient.id, notification_id, data)
+            send_push.s(broadcast_id, org_id, recipient.id, notification_id, data).set(
+                kwargsrepr=repr({"data": redacted_data})
+            )
         )
 
     chord(tasks)(send_recipient_callback.si(broadcast_id, recipient.id))

@@ -17,6 +17,7 @@ from socket import gethostbyname, gethostname
 
 import sentry_sdk
 from dotenv import load_dotenv, find_dotenv
+from kombu import Queue, Exchange
 
 load_dotenv(find_dotenv())
 
@@ -194,33 +195,12 @@ CELERY_RESULT_BACKEND = os.environ.get(
     "CELERY_RESULT_BACKEND", "redis://127.0.0.1:6379/0"
 )
 CELERY_TASK_STORE_ERRORS_EVEN_IF_IGNORED = True
-CELERY_ROUTES = (
-    [
-        (
-            (
-                "notification.tasks.send_broadcast",
-                "notification.tasks.send_broadcast_callback",
-            ),
-            {"queue": "broadcasts"},
-        ),
-        (
-            (
-                "notification.tasks.send_recipient",
-                "notification.tasks.send_subscriber",
-                "notification.tasks.send_recipient_callback",
-            ),
-            {"queue": "recipients"},
-        ),
-        (
-            (
-                "notification.tasks.send_email",
-                "notification.tasks.send_sms",
-                "notification.tasks.send_push",
-                "notification.tasks.send_in_app",
-            ),
-            {"queue": "deliveries"},
-        ),
-    ],
+CELERY_TASK_QUEUES = (
+    Queue("celery", Exchange("celery"), "celery"),
+    Queue("broadcasts", Exchange("broadcasts"), "broadcasts"),
+    Queue("notifications", Exchange("notifications"), "notifications"),
+    Queue("outbound", Exchange("outbound"), "outbound"),
+    Queue("dead_letter", Exchange("dead_letter"), "dead_letter"),
 )
 
 CELERYBEAT_SCHEDULER = "redbeat.RedBeatScheduler"

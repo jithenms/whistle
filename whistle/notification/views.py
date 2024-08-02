@@ -4,9 +4,9 @@ from datetime import datetime, timezone, timedelta
 from celery.schedules import schedule
 from django.db import transaction
 from django.http import JsonResponse
-from drf_spectacular.utils import extend_schema, OpenApiParameter
 from redbeat import RedBeatSchedulerEntry, RedBeatScheduler
 from rest_framework import mixins, status
+from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.generics import CreateAPIView
 from rest_framework.permissions import AllowAny
@@ -86,24 +86,54 @@ class NotificationViewSet(
         else:
             return self.queryset.filter(organization=self.request.user)
 
-    @extend_schema(
-        parameters=[
-            OpenApiParameter(
-                name="X-External-Id",
-                type=str,
-                location=OpenApiParameter.HEADER,
-                description="External ID",
-            ),
-            OpenApiParameter(
-                name="X-External-Id-Hmac",
-                type=str,
-                location=OpenApiParameter.HEADER,
-                description="External ID HMAC",
-            ),
-        ]
-    )
-    def list(self, request):
-        return super().list(request)
+    @action(methods=["POST"], detail=True)
+    def read(self, request, **kwargs):
+        notification = self.get_object()
+        notification.read_at = datetime.now(timezone.utc)
+        notification.save()
+        return Response({"status": "success"}, status=status.HTTP_200_OK)
+
+    @action(methods=["POST"], detail=True)
+    def unread(self, request, **kwargs):
+        notification = self.get_object()
+        notification.read_at = None
+        notification.save()
+        return Response({"status": "success"}, status=status.HTTP_200_OK)
+
+    @action(methods=["POST"], detail=True)
+    def seen(self, request, **kwargs):
+        notification = self.get_object()
+        notification.seen_at = datetime.now(timezone.utc)
+        notification.save()
+        return Response({"status": "success"}, status=status.HTTP_200_OK)
+
+    @action(methods=["POST"], detail=True)
+    def unseen(self, request, **kwargs):
+        notification = self.get_object()
+        notification.seen_at = None
+        notification.save()
+        return Response({"status": "success"}, status=status.HTTP_200_OK)
+
+    @action(methods=["POST"], detail=True)
+    def archive(self, request, **kwargs):
+        notification = self.get_object()
+        notification.archived_at = datetime.now(timezone.utc)
+        notification.save()
+        return Response({"status": "success"}, status=status.HTTP_200_OK)
+
+    @action(methods=["POST"], detail=True)
+    def unarchive(self, request, **kwargs):
+        notification = self.get_object()
+        notification.archived_at = None
+        notification.save()
+        return Response({"status": "success"}, status=status.HTTP_200_OK)
+
+    @action(methods=["POST"], detail=True)
+    def clicked(self, request, **kwargs):
+        notification = self.get_object()
+        notification.clicked_at = datetime.now(timezone.utc)
+        notification.save()
+        return Response({"status": "success"}, status=status.HTTP_200_OK)
 
 
 class BroadcastViewSet(

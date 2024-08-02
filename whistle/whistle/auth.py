@@ -1,7 +1,6 @@
 import hashlib
 import hmac
 import logging
-import secrets
 
 import jwt
 from django.conf import settings
@@ -15,6 +14,7 @@ from organization.models import Organization, OrganizationCredentials
 from organization.models import OrganizationMember
 from user.models import User
 from whistle import utils
+from whistle.utils import generate_api_credentials
 
 jwks_client = PyJWKClient(settings.JWKS_ENDPOINT_URL)
 
@@ -230,15 +230,3 @@ def update_or_create_organization_member(data, user, org):
         )
 
     return org_member
-
-
-def generate_api_credentials():
-    api_key = secrets.token_urlsafe(32)
-    api_secret = secrets.token_urlsafe(64)
-    api_secret_salt = secrets.token_urlsafe(8)
-
-    return (
-        api_key,
-        api_secret,
-        api_secret_salt,
-    )

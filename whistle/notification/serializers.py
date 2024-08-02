@@ -244,3 +244,7 @@ class BroadcastSerializer(serializers.ModelSerializer):
         instance = Broadcast(**validated_data, **kwargs)
         instance.save()
         return instance
+
+
+class NotificationStatusSerializer(serializers.Serializer):
+    status = serializers.CharField(read_only=True)

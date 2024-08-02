@@ -4,20 +4,20 @@ from datetime import datetime, timezone, timedelta
 from celery.schedules import schedule
 from django.db import transaction
 from django.http import JsonResponse
-from drf_spectacular.utils import extend_schema, OpenApiParameter
 from redbeat import RedBeatSchedulerEntry, RedBeatScheduler
 from rest_framework import mixins, status
+from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
-from rest_framework.generics import CreateAPIView
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
-from rest_framework.viewsets import GenericViewSet
+from rest_framework.viewsets import GenericViewSet, ReadOnlyModelViewSet
 
 from external_user.models import ExternalUser
 from notification.models import Notification, Broadcast
 from notification.serializers import (
     NotificationSerializer,
     BroadcastSerializer,
+    NotificationStatusSerializer,
 )
 from preference.models import ChannelChoices
 from whistle.auth import (
@@ -30,20 +30,18 @@ from whistle.pagination import StandardLimitOffsetPagination
 from .tasks import send_broadcast
 
 
-class NotificationViewSet(
-    mixins.ListModelMixin,
-    mixins.RetrieveModelMixin,
-    GenericViewSet,
-):
+class NotificationViewSet(ReadOnlyModelViewSet):
     queryset = Notification.objects.all()
     serializer_class = NotificationSerializer
     authentication_classes = [ClientAuth]
     permission_classes = [AllowAny]
     pagination_class = StandardLimitOffsetPagination
 
-    def get_queryset(self):
-        org = self.request.user
-        return self.queryset.filter(organization=org)
+    def get_serializer_class(self):
+        extra_actions = [action.__name__ for action in self.get_extra_actions()]
+        if self.action in extra_actions:
+            return NotificationStatusSerializer
+        return super().get_serializer_class()
 
     def get_authenticators(self):
         external_id = (
@@ -62,12 +60,15 @@ class NotificationViewSet(
         return [AllowAny()]
 
     def get_queryset(self):
+        org = self.request.user
         external_id = (
             self.request.headers.get("X-External-Id") if self.request else None
         )
         if external_id is not None:
             try:
-                user = ExternalUser.objects.get(external_id=external_id)
+                user = ExternalUser.objects.get(
+                    organiation=org, external_id=external_id
+                )
             except ExternalUser.DoesNotExist:
                 logging.error(
                     "Invalid external id: %s provided for org: %s",
@@ -79,35 +80,64 @@ class NotificationViewSet(
                     "invalid_external_id",
                 )
             return self.queryset.filter(
-                organization=self.request.user,
+                organization=org,
                 channel=ChannelChoices.IN_APP,
                 recipient=user,
             )
         else:
-            return self.queryset.filter(organization=self.request.user)
+            return self.queryset.filter(organization=org)
 
-    @extend_schema(
-        parameters=[
-            OpenApiParameter(
-                name="X-External-Id",
-                type=str,
-                location=OpenApiParameter.HEADER,
-                description="External ID",
-            ),
-            OpenApiParameter(
-                name="X-External-Id-Hmac",
-                type=str,
-                location=OpenApiParameter.HEADER,
-                description="External ID HMAC",
-            ),
-        ]
-    )
-    def list(self, request):
-        return super().list(request)
+    @action(methods=["POST"], detail=True)
+    def read(self, request, **kwargs):
+        notification = self.get_object()
+        notification.read_at = datetime.now(timezone.utc)
+        notification.save()
+        return Response({"status": "success"})
+
+    @action(methods=["POST"], detail=True)
+    def unread(self, request, **kwargs):
+        notification = self.get_object()
+        notification.read_at = None
+        notification.save()
+        return Response({"status": "success"})
+
+    @action(methods=["POST"], detail=True)
+    def seen(self, request, **kwargs):
+        notification = self.get_object()
+        notification.seen_at = datetime.now(timezone.utc)
+        notification.save()
+        return Response({"status": "success"})
+
+    @action(methods=["POST"], detail=True)
+    def unseen(self, request, **kwargs):
+        notification = self.get_object()
+        notification.seen_at = None
+        notification.save()
+        return Response({"status": "success"})
+
+    @action(methods=["POST"], detail=True)
+    def archive(self, request, **kwargs):
+        notification = self.get_object()
+        notification.archived_at = datetime.now(timezone.utc)
+        notification.save()
+        return Response({"status": "success"})
+
+    @action(methods=["POST"], detail=True)
+    def unarchive(self, request, **kwargs):
+        notification = self.get_object()
+        notification.archived_at = None
+        notification.save()
+        return Response({"status": "success"})
+
+    @action(methods=["POST"], detail=True)
+    def clicked(self, request, **kwargs):
+        notification = self.get_object()
+        notification.clicked_at = datetime.now(timezone.utc)
+        notification.save()
+        return Response({"status": "success"})
 
 
 class BroadcastViewSet(
-    CreateAPIView,
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
     mixins.DestroyModelMixin,

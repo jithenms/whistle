@@ -7,6 +7,7 @@ from rest_framework.exceptions import (
     ValidationError,
     AuthenticationFailed,
     PermissionDenied,
+    MethodNotAllowed,
 )
 from rest_framework.utils.serializer_helpers import ReturnDict
 from rest_framework.views import exception_handler
@@ -74,6 +75,11 @@ def custom_exception_handler(exc, context):
             response.data["type"] = "not_found"
             response.data["detail"] = "Resource not found"
             response.status_code = status.HTTP_404_NOT_FOUND
+            return response
+        elif isinstance(exc, MethodNotAllowed):
+            response.data["type"] = "not_allowed"
+            response.data["detail"] = "Method not allowed"
+            response.status_code = status.HTTP_403_FORBIDDEN
             return response
 
     if isinstance(exc, IntegrityError):

@@ -67,7 +67,7 @@ class NotificationViewSet(ReadOnlyModelViewSet):
         if external_id is not None:
             try:
                 user = ExternalUser.objects.get(
-                    organiation=org, external_id=external_id
+                    organization=org, external_id=external_id
                 )
             except ExternalUser.DoesNotExist:
                 logging.error(

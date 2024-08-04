@@ -9,6 +9,7 @@ from preference.models import ChannelChoices
 
 class Broadcast(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    idempotency_id = models.UUIDField(unique=True)
     organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
     recipients = models.ManyToManyField(ExternalUser, through="BroadcastRecipient")
     category = models.SlugField(null=True)
@@ -26,6 +27,7 @@ class Broadcast(models.Model):
 class BroadcastRecipient(models.Model):
     broadcast = models.ForeignKey(Broadcast, on_delete=models.CASCADE)
     recipient = models.ForeignKey(ExternalUser, on_delete=models.CASCADE)
+    status = models.CharField()
     error_reason = models.CharField()
 
     class Meta:
@@ -54,5 +56,5 @@ class NotificationDelivery(models.Model):
     action_link = models.CharField(null=True, blank=True)
     status = models.CharField()
     error_reason = models.CharField(null=True, blank=True)
-    metadata = models.JSONField(null=True, blank=True)
+    metadata = models.JSONField(null=True, blank=True, default=dict)
     sent_at = models.DateTimeField(null=True)

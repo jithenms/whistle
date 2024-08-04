@@ -1,4 +1,5 @@
 import logging
+import uuid
 from datetime import datetime, timezone, timedelta
 
 from celery.schedules import schedule
@@ -140,7 +141,6 @@ class NotificationViewSet(ReadOnlyModelViewSet):
 class BroadcastViewSet(
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
-    mixins.DestroyModelMixin,
     GenericViewSet,
 ):
     queryset = Broadcast.objects.all()
@@ -156,7 +156,21 @@ class BroadcastViewSet(
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        instance = serializer.save(status="queued", sent_at=datetime.now(timezone.utc))
+        persisted_data = serializer.validated_data.copy()
+        persisted_data.pop("recipients")
+        persisted_data.pop("channels")
+        persisted_data.pop("merge_tags")
+
+        idempotency_id = request.headers.get("IDEMPOTENCY-ID", uuid.uuid4())
+        instance, created = Broadcast.objects.get_or_create(
+            organization_id=self.request.user.id,
+            idempotency_id=idempotency_id,
+            defaults={
+                **persisted_data,
+                "status": "queued",
+                "sent_at": datetime.now(timezone.utc),
+            },
+        )
 
         schedule_at = serializer.validated_data.get("schedule_at")
         if schedule_at:
@@ -256,3 +270,47 @@ class BroadcastViewSet(
                 error,
             )
             raise
+
+    def partial_update(self, request, *args, **kwargs):
+        kwargs["partial"] = True
+        return self.update(request, *args, **kwargs)
+
+    @transaction.atomic()
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop("partial", False)
+        instance = self.get_object()
+        if instance.schedule_at and instance.status == "scheduled":
+            serializer = self.get_serializer(
+                instance, data=request.data, partial=partial
+            )
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+
+            key = f"redbeat:broadcast_{instance.id}"
+            entry = RedBeatScheduler(app=app).Entry.from_key(key=key, app=app)
+            entry.update(serializer.validated_data)
+
+            if getattr(instance, "_prefetched_objects_cache", None):
+                # If 'prefetch_related' has been applied to a queryset, we need to
+                # forcibly invalidate the prefetch cache on the instance.
+                instance._prefetched_objects_cache = {}
+
+            return Response(serializer.validated_data)
+        else:
+            raise ValidationError(
+                "The broadcast cannot be updated because it has already been processed or is not scheduled."
+            )
+
+    @transaction.atomic()
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if instance.schedule_at and instance.status == "scheduled":
+            key = f"redbeat:broadcast_{instance.id}"
+            entry = RedBeatScheduler(app=app).Entry.from_key(key=key, app=app)
+            entry.delete()
+            super().perform_destroy(instance)
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        else:
+            raise ValidationError(
+                "The broadcast cannot be cancelled because it has already been processed or is not scheduled."
+            )

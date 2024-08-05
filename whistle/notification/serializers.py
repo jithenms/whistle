@@ -1,7 +1,6 @@
 from rest_framework import serializers
 
 from audience.models import Audience
-from external_user.models import ExternalUser
 from external_user.serializers import ExternalUserSerializer
 from notification.models import (
     Notification,
@@ -35,25 +34,6 @@ class NotificationDeliverySerializer(serializers.ModelSerializer):
             "metadata",
             "sent_at",
         )
-
-
-class NotificationSerializer(serializers.ModelSerializer):
-    deliveries = NotificationDeliverySerializer(read_only=True, many=True)
-    recipient = ExternalUserSerializer(read_only=True)
-
-    class Meta:
-        model = Notification
-        fields = [
-            "id",
-            "broadcast_id",
-            "recipient",
-            "deliveries",
-            "seen_at",
-            "read_at",
-            "clicked_at",
-            "archived_at",
-        ]
-        read_only_fields = ("broadcast", "recipient", "deliveries")
 
 
 class APNSProviderSerializer(serializers.Serializer):
@@ -242,6 +222,42 @@ class BroadcastSerializer(serializers.ModelSerializer):
         instance = Broadcast(**validated_data, **kwargs)
         instance.save()
         return instance
+
+
+class NotificationSerializer(serializers.ModelSerializer):
+    deliveries = NotificationDeliverySerializer(read_only=True, many=True)
+    broadcast = BroadcastSerializer(read_only=True)
+    recipient = ExternalUserSerializer(read_only=True)
+
+    class Meta:
+        model = Notification
+        fields = [
+            "id",
+            "status",
+            "broadcast",
+            "recipient",
+            "deliveries",
+            "seen_at",
+            "read_at",
+            "clicked_at",
+            "archived_at",
+        ]
+        read_only_fields = ("broadcast", "recipient", "deliveries")
+
+
+class InboxSerializer(serializers.ModelSerializer):
+    broadcast = BroadcastSerializer(read_only=True)
+
+    class Meta:
+        model = Notification
+        fields = [
+            "id",
+            "broadcast",
+            "seen_at",
+            "read_at",
+            "clicked_at",
+            "archived_at",
+        ]
 
 
 class NotificationStatusSerializer(serializers.Serializer):

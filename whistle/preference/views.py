@@ -1,6 +1,5 @@
 import logging
 
-from drf_spectacular.utils import extend_schema, OpenApiParameter
 from rest_framework.exceptions import ValidationError
 from rest_framework.viewsets import ModelViewSet
 
@@ -17,9 +16,7 @@ class PreferenceViewSet(ModelViewSet):
     permission_classes = [IsValidExternalId]
 
     def get_queryset(self):
-        external_id = (
-            self.request.headers.get("X-External-Id") if self.request else None
-        )
+        external_id = self.request.headers.get("X-External-Id")
         try:
             user = ExternalUser.objects.get(
                 external_id=external_id,

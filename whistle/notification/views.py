@@ -9,16 +9,21 @@ from redbeat import RedBeatSchedulerEntry, RedBeatScheduler
 from rest_framework import mixins, status
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
-from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet, ReadOnlyModelViewSet
 
 from external_user.models import ExternalUser
-from notification.models import Notification, Broadcast, BroadcastStatusChoices
+from notification.models import (
+    Notification,
+    Broadcast,
+    BroadcastStatusChoices,
+    DeliveryStatusChoices,
+)
 from notification.serializers import (
     NotificationSerializer,
     BroadcastSerializer,
     NotificationStatusSerializer,
+    InboxSerializer,
 )
 from preference.models import ChannelChoices
 from whistle.auth import (
@@ -31,62 +36,37 @@ from whistle.pagination import StandardLimitOffsetPagination
 from .tasks import send_broadcast
 
 
-class NotificationViewSet(ReadOnlyModelViewSet):
+class InboxViewSet(ReadOnlyModelViewSet):
     queryset = Notification.objects.all()
-    serializer_class = NotificationSerializer
+    serializer_class = InboxSerializer
     authentication_classes = [ClientAuth]
-    permission_classes = [AllowAny]
+    permission_classes = [IsValidExternalId]
     pagination_class = StandardLimitOffsetPagination
 
-    def get_serializer_class(self):
-        extra_actions = [action.__name__ for action in self.get_extra_actions()]
-        if self.action in extra_actions:
-            return NotificationStatusSerializer
-        return super().get_serializer_class()
-
-    def get_authenticators(self):
-        external_id = (
-            self.request.headers.get("X-External-Id") if self.request else None
-        )
-        if external_id is None:
-            return [ServerAuth()]
-        return super(NotificationViewSet, self).get_authenticators()
-
-    def get_permissions(self):
-        external_id = (
-            self.request.headers.get("X-External-Id") if self.request else None
-        )
-        if external_id is not None:
-            return [IsValidExternalId()]
-        return [AllowAny()]
-
     def get_queryset(self):
+        external_id = self.request.headers.get("X-External-Id")
         org = self.request.user
-        external_id = (
-            self.request.headers.get("X-External-Id") if self.request else None
-        )
-        if external_id is not None:
-            try:
-                user = ExternalUser.objects.get(
-                    organization=org, external_id=external_id
-                )
-            except ExternalUser.DoesNotExist:
-                logging.error(
-                    "Invalid external id: %s provided for org: %s",
-                    external_id,
-                    self.request.user.id,
-                )
-                raise ValidationError(
-                    "Invalid External Id. Please provide a valid External Id in the request header.",
-                    "invalid_external_id",
-                )
-            return self.queryset.filter(
-                organization=org,
-                channel=ChannelChoices.IN_APP,
-                recipient=user,
+        try:
+            user = ExternalUser.objects.get(
+                external_id=external_id,
+                organization=self.request.user,
             )
-        else:
-            return self.queryset.filter(organization=org)
+        except ExternalUser.DoesNotExist:
+            logging.error(
+                "Invalid external id: %s provided for org: %s while querying preferences",
+                external_id,
+                self.request.user.id,
+            )
+            raise ValidationError(
+                "Invalid External Id. Please provide a valid External Id in the request header.",
+                "invalid_external_id",
+            )
+        return self.queryset.prefetch_related("deliveries").filter(
+            recipient=user,
+            organization=org,
+            deliveries__channel=ChannelChoices.IN_APP,
+            deliveries__status=DeliveryStatusChoices.DELIVERED,
+        )
 
     @action(methods=["POST"], detail=True)
     def read(self, request, **kwargs):
@@ -110,13 +90,6 @@ class NotificationViewSet(ReadOnlyModelViewSet):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(methods=["POST"], detail=True)
-    def unseen(self, request, **kwargs):
-        notification = self.get_object()
-        notification.seen_at = None
-        notification.save()
-        return Response(status=status.HTTP_204_NO_CONTENT)
-
-    @action(methods=["POST"], detail=True)
     def archive(self, request, **kwargs):
         notification = self.get_object()
         notification.archived_at = datetime.now(timezone.utc)
@@ -136,6 +109,23 @@ class NotificationViewSet(ReadOnlyModelViewSet):
         notification.clicked_at = datetime.now(timezone.utc)
         notification.save()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class NotificationViewSet(ReadOnlyModelViewSet):
+    queryset = Notification.objects.all()
+    serializer_class = NotificationSerializer
+    authentication_classes = [ServerAuth]
+    pagination_class = StandardLimitOffsetPagination
+
+    def get_serializer_class(self):
+        extra_actions = [action.__name__ for action in self.get_extra_actions()]
+        if self.action in extra_actions:
+            return NotificationStatusSerializer
+        return super().get_serializer_class()
+
+    def get_queryset(self):
+        org = self.request.user
+        return self.queryset.filter(organization=org)
 
 
 class BroadcastViewSet(

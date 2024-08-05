@@ -3,7 +3,8 @@ import uuid
 from django.db import models
 
 from organization.models import Organization
-from whistle import fields, utils, settings
+from whistle import fields, utils
+from whistle.fields import EncryptedFieldTypeChoices
 
 
 class ExternalUser(models.Model):
@@ -11,16 +12,16 @@ class ExternalUser(models.Model):
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE)
     external_id = models.CharField()
     first_name = fields.EncryptedField(
-        key_id=settings.KMS_PERSONAL_DATA_KEY_ARN, null=True
+        EncryptedFieldTypeChoices.PERSONAL_DATA, null=True
     )
     first_name_hash = models.CharField(null=True)
     last_name = fields.EncryptedField(
-        key_id=settings.KMS_PERSONAL_DATA_KEY_ARN, null=True
+        EncryptedFieldTypeChoices.PERSONAL_DATA, null=True
     )
     last_name_hash = models.CharField(null=True)
-    email = fields.EncryptedField(key_id=settings.KMS_PERSONAL_DATA_KEY_ARN)
+    email = fields.EncryptedField(EncryptedFieldTypeChoices.PERSONAL_DATA)
     email_hash = models.CharField()
-    phone = fields.EncryptedField(key_id=settings.KMS_PERSONAL_DATA_KEY_ARN, null=True)
+    phone = fields.EncryptedField(EncryptedFieldTypeChoices.PERSONAL_DATA, null=True)
     phone_hash = models.CharField(null=True)
     metadata = models.JSONField(null=True, blank=True)
 

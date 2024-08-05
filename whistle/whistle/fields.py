@@ -11,10 +11,24 @@ kms_client = aws_encryption_sdk.EncryptionSDKClient()
 kms_cache = aws_encryption_sdk.LocalCryptoMaterialsCache(settings.KMS_CACHE_CAPACITY)
 
 
+class EncryptedFieldTypeChoices(models.TextChoices):
+    PERSONAL_DATA = "PERSONAL_DATA", "PERSONAL_DATA"
+    API_CREDENTIALS = "API_CREDENTIALS", "API_CREDENTIALS"
+
+
+field_arns = {
+    EncryptedFieldTypeChoices.PERSONAL_DATA: settings.KMS_PERSONAL_DATA_KEY_ARN,
+    EncryptedFieldTypeChoices.API_CREDENTIALS: settings.KMS_API_CREDENTIALS_KEY_ARN,
+}
+
+
 class EncryptedField(models.CharField):
-    def __init__(self, key_id, cache_expiry=settings.KMS_CACHE_EXPIRY, *args, **kwargs):
+    def __init__(
+        self, field_type, cache_expiry=settings.KMS_CACHE_EXPIRY, *args, **kwargs
+    ):
         kwargs.setdefault("editable", True)
-        self.key_id = key_id
+        self.field_type = field_type
+        self.key_id = field_arns[self.field_type]
         self.kms_key_provider = aws_encryption_sdk.StrictAwsKmsMasterKeyProvider(
             key_ids=[self.key_id]
         )
@@ -28,7 +42,7 @@ class EncryptedField(models.CharField):
 
     def deconstruct(self):
         name, path, args, kwargs = super().deconstruct()
-        kwargs["key_id"] = self.key_id
+        kwargs["field_type"] = self.field_type
         return name, path, args, kwargs
 
     def check(self, **kwargs):

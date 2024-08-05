@@ -14,7 +14,7 @@ from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet, ReadOnlyModelViewSet
 
 from external_user.models import ExternalUser
-from notification.models import Notification, Broadcast
+from notification.models import Notification, Broadcast, BroadcastStatusChoices
 from notification.serializers import (
     NotificationSerializer,
     BroadcastSerializer,
@@ -93,49 +93,49 @@ class NotificationViewSet(ReadOnlyModelViewSet):
         notification = self.get_object()
         notification.read_at = datetime.now(timezone.utc)
         notification.save()
-        return Response({"status": "success"})
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(methods=["POST"], detail=True)
     def unread(self, request, **kwargs):
         notification = self.get_object()
         notification.read_at = None
         notification.save()
-        return Response({"status": "success"})
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(methods=["POST"], detail=True)
     def seen(self, request, **kwargs):
         notification = self.get_object()
         notification.seen_at = datetime.now(timezone.utc)
         notification.save()
-        return Response({"status": "success"})
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(methods=["POST"], detail=True)
     def unseen(self, request, **kwargs):
         notification = self.get_object()
         notification.seen_at = None
         notification.save()
-        return Response({"status": "success"})
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(methods=["POST"], detail=True)
     def archive(self, request, **kwargs):
         notification = self.get_object()
         notification.archived_at = datetime.now(timezone.utc)
         notification.save()
-        return Response({"status": "success"})
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(methods=["POST"], detail=True)
     def unarchive(self, request, **kwargs):
         notification = self.get_object()
         notification.archived_at = None
         notification.save()
-        return Response({"status": "success"})
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(methods=["POST"], detail=True)
     def clicked(self, request, **kwargs):
         notification = self.get_object()
         notification.clicked_at = datetime.now(timezone.utc)
         notification.save()
-        return Response({"status": "success"})
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class BroadcastViewSet(
@@ -167,10 +167,19 @@ class BroadcastViewSet(
             idempotency_id=idempotency_id,
             defaults={
                 **persisted_data,
-                "status": "queued",
+                "status": BroadcastStatusChoices.QUEUED,
                 "sent_at": datetime.now(timezone.utc),
             },
         )
+
+        if not created:
+            return JsonResponse(
+                data={
+                    "id": instance.id,
+                    **serializer.validated_data,
+                    "status": instance.status,
+                }
+            )
 
         schedule_at = serializer.validated_data.get("schedule_at")
         if schedule_at:
@@ -183,22 +192,8 @@ class BroadcastViewSet(
                 **serializer.validated_data,
                 "status": instance.status,
             },
-            status=status.HTTP_200_OK,
+            status=status.HTTP_202_ACCEPTED,
         )
-
-    @transaction.atomic()
-    def destroy(self, request, *args, **kwargs):
-        instance = self.get_object()
-        if instance.schedule_at and instance.status == "scheduled":
-            key = f"redbeat:broadcast_{instance.id}"
-            entry = RedBeatScheduler(app=app).Entry.from_key(key=key, app=app)
-            entry.delete()
-            super().perform_destroy(instance)
-            return Response(status=status.HTTP_204_NO_CONTENT)
-        else:
-            raise ValidationError(
-                "The broadcast cannot be deleted because it has already been processed or is not scheduled."
-            )
 
     def queue_broadcast(self, broadcast, serializer):
         try:
@@ -223,7 +218,7 @@ class BroadcastViewSet(
                 self.request.user.id,
                 error,
             )
-            broadcast.status = "failed"
+            broadcast.status = BroadcastStatusChoices.FAILED
             broadcast.save()
             logging.info(
                 "Broadcast failed to queue with id: %s for org: %s",
@@ -251,7 +246,7 @@ class BroadcastViewSet(
             )
             entry.save()
             broadcast.schedule_at = schedule_at
-            broadcast.status = "scheduled"
+            broadcast.status = BroadcastStatusChoices.SCHEDULED
             broadcast.save()
             logging.info(
                 "Broadcast scheduled at: %s with id: %s for org: %s",
@@ -261,7 +256,7 @@ class BroadcastViewSet(
             )
             return
         except Exception as error:
-            broadcast.status = "failed"
+            broadcast.status = BroadcastStatusChoices.FAILED
             broadcast.save()
             logging.error(
                 "Failed to schedule broadcast: %s in org: %s with error: %s",
@@ -275,7 +270,7 @@ class BroadcastViewSet(
         kwargs["partial"] = True
         return self.update(request, *args, **kwargs)
 
-    @transaction.atomic()
+    @transaction.atomic
     def update(self, request, *args, **kwargs):
         partial = kwargs.pop("partial", False)
         instance = self.get_object()
@@ -301,7 +296,7 @@ class BroadcastViewSet(
                 "The broadcast cannot be updated because it has already been processed or is not scheduled."
             )
 
-    @transaction.atomic()
+    @transaction.atomic
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
         if instance.schedule_at and instance.status == "scheduled":

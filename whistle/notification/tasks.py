@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 
 from asgiref.sync import async_to_sync
 from celery import chord
+from celery.exceptions import MaxRetriesExceededError
+from celery.utils.time import get_exponential_backoff_interval
 from channels.layers import get_channel_layer
 from django.conf import settings
 from django.db.models import Q
@@ -39,8 +41,10 @@ from external_user.models import ExternalUser, ExternalUserDevice, PlatformChoic
 from notification.models import (
     Notification,
     Broadcast,
-    BroadcastRecipient,
     NotificationDelivery,
+    DeliveryStatusChoices,
+    NotificationStatusChoices,
+    BroadcastStatusChoices,
 )
 from preference.models import ExternalUserPreference, ChannelChoices
 from subscription.models import ExternalUserSubscription
@@ -83,17 +87,22 @@ def send_broadcast(self, broadcast_id, org_id, data):
         ).exclude(**exclude_kwargs)
 
         for recipient in recipients.iterator():
-            recipient_count = BroadcastRecipient.objects.filter(
-                recipient_id=recipient.id
-            ).count()
-            if recipient_count != 0:
+            notification, created = persist_notification(
+                org_id,
+                broadcast_id,
+                recipient.id,
+                status=NotificationStatusChoices.QUEUED,
+            )
+            if (
+                not created
+                and notification.status == NotificationStatusChoices.PROCESSED
+            ):
                 logging.info(
                     "User: %s already successfully processed in broadcast: %s",
                     recipient.id,
                     broadcast_id,
                 )
                 continue
-            notification = persist_notification(org_id, broadcast_id, recipient.id)
             tasks.append(
                 send_recipient.s(
                     broadcast_id, org_id, recipient.id, notification.id, data=data
@@ -108,19 +117,22 @@ def send_broadcast(self, broadcast_id, org_id, data):
             )
             if recipient_entity:
                 if recipient_entity.id not in recipient_ids:
-                    recipient_count = BroadcastRecipient.objects.filter(
-                        recipient_id=recipient_entity.id
-                    ).count()
-                    if recipient_count != 0:
+                    notification, created = persist_notification(
+                        org_id,
+                        broadcast_id,
+                        recipient_entity.id,
+                        status=NotificationStatusChoices.QUEUED,
+                    )
+                    if (
+                        not created
+                        and notification.status == NotificationStatusChoices.PROCESSED
+                    ):
                         logging.info(
                             "User: %s already successfully processed in broadcast: %s",
                             recipient_entity.id,
                             broadcast_id,
                         )
                         continue
-                    notification = persist_notification(
-                        org_id, broadcast_id, recipient_entity.id
-                    )
                     tasks.append(
                         send_recipient.s(
                             broadcast_id,
@@ -138,26 +150,29 @@ def send_broadcast(self, broadcast_id, org_id, data):
         )
 
         for subscriber in subscribers.iterator():
-            if subscriber.id not in recipient_ids:
-                recipient_count = BroadcastRecipient.objects.filter(
-                    recipient_id=subscriber.id
-                ).count()
-                if recipient_count != 0:
+            if subscriber.user.id not in recipient_ids:
+                notification, created = persist_notification(
+                    org_id,
+                    broadcast_id,
+                    subscriber.user.id,
+                    status=NotificationStatusChoices.QUEUED,
+                )
+                if (
+                    not created
+                    and notification.status == NotificationStatusChoices.PROCESSED
+                ):
                     logging.info(
-                        "User: %s already successfully processed in broadcast: %s",
-                        subscriber.id,
+                        "Subscriber: %s already successfully processed in broadcast: %s",
+                        subscriber.user.id,
                         broadcast_id,
                     )
                     continue
-                notification = persist_notification(
-                    org_id, broadcast_id, subscriber.user.id
-                )
                 tasks.append(
                     send_subscriber.s(
                         broadcast_id, org_id, subscriber.id, notification.id, data=data
                     ).set(kwargsrepr=repr({"data": redacted_data}))
                 )
-                recipient_ids.add(subscriber.id)
+                recipient_ids.add(subscriber.user.id)
 
     if "schedule_at" in data:
         entry = RedBeatSchedulerEntry.from_key(
@@ -165,7 +180,9 @@ def send_broadcast(self, broadcast_id, org_id, data):
         )
         entry.delete()
 
-    chord(tasks)(send_broadcast_callback.si(broadcast_id, "processed"))
+    chord(tasks)(
+        send_broadcast_callback.si(broadcast_id, BroadcastStatusChoices.PROCESSED)
+    )
 
     return
 
@@ -234,131 +251,203 @@ def send_subscriber(self, broadcast_id, org_id, subscriber_id, notification_id, 
         return
 
 
-@app.task(bind=True, ignore_result=True, queue="outbound")
+@app.task(bind=True, ignore_result=True, queue="outbound", max_retries=5)
 def send_sms(self, broadcast_id, org_id, user_id, notification_id, data, phone):
-    delivered_count = (
-        NotificationDelivery.objects.filter(
-            notification_id=notification_id,
-            channel=ChannelChoices.SMS.value,
+    try:
+        delivered_count = (
+            NotificationDelivery.objects.filter(
+                notification_id=notification_id,
+                channel=ChannelChoices.SMS.value,
+            )
+            .filter(
+                Q(status=DeliveryStatusChoices.DELIVERED)
+                | Q(status=DeliveryStatusChoices.NOT_SENT)
+            )
+            .count()
         )
-        .filter(Q(status="sent") | Q(status="not_sent"))
-        .count()
-    )
-    if delivered_count != 0:
-        logging.info(
-            "SMS notification already delivered for user: %s in org: %s for broadcast: %s",
-            user_id,
-            org_id,
-            broadcast_id,
-        )
-        return
-
-    provider = Provider.objects.prefetch_related("credentials").get(
-        organization_id=org_id, provider_type=ProviderTypeChoices.SMS
-    )
-
-    match provider.provider:
-        case ProviderChoices.TWILIO:
-            return handle_twilio(
-                broadcast_id,
-                data,
-                notification_id,
-                provider,
+        if delivered_count != 0:
+            logging.info(
+                "SMS notification already delivered for user: %s in org: %s for broadcast: %s",
                 user_id,
-                phone,
+                org_id,
+                broadcast_id,
             )
-        case _:
-            logging.error("Invalid SMS Provider")
             return
 
+        provider = Provider.objects.prefetch_related("credentials").get(
+            organization_id=org_id, provider_type=ProviderTypeChoices.SMS
+        )
 
-@app.task(bind=True, ignore_result=True, queue="outbound")
+        match provider.provider:
+            case ProviderChoices.TWILIO:
+                return handle_twilio(
+                    broadcast_id,
+                    data,
+                    notification_id,
+                    provider,
+                    user_id,
+                    phone,
+                )
+            case _:
+                logging.error("Invalid SMS Provider")
+                return
+    except TwilioRestException as e:
+        try:
+            countdown = get_exponential_backoff_interval(
+                factor=settings.CELERY_RETRY_BACKOFF,
+                retries=self.request.retries,
+                maximum=settings.CELERY_BACKOFF_MAX,
+                full_jitter=settings.CELERY_RETRY_JITTER,
+            )
+            self.retry(countdown=countdown)
+        except MaxRetriesExceededError:
+            logging.error(
+                "Max retries reached trying to send Twilio SMS for user: %s in broadcast: %s",
+                user_id,
+                broadcast_id,
+            )
+            persist_notification_delivery(
+                notification_id,
+                channel=ChannelChoices.SMS,
+                status=DeliveryStatusChoices.UNDELIVERED,
+            )
+
+
+@app.task(bind=True, ignore_result=True, queue="outbound", max_retries=5)
 def send_email(self, broadcast_id, org_id, user_id, notification_id, data, email):
-    delivered_count = (
-        NotificationDelivery.objects.filter(
-            notification_id=notification_id,
-            channel=ChannelChoices.EMAIL.value,
-        )
-        .filter(Q(status="sent") | Q(status="not_sent"))
-        .count()
-    )
-    if delivered_count != 0:
-        logging.info(
-            "Email notification already delivered for user: %s in org: %s for broadcast: %s",
-            user_id,
-            org_id,
-            broadcast_id,
-        )
-        return
-
-    provider = Provider.objects.prefetch_related("credentials").get(
-        organization_id=org_id, provider_type=ProviderTypeChoices.EMAIL
-    )
-
-    match provider.provider:
-        case ProviderChoices.SENDGRID:
-            return handle_sendgrid(
-                broadcast_id, data, notification_id, provider, user_id, email
+    try:
+        delivered_count = (
+            NotificationDelivery.objects.filter(
+                notification_id=notification_id,
+                channel=ChannelChoices.EMAIL.value,
             )
-        case _:
-            logging.error("Invalid Email Provider")
+            .filter(
+                Q(status=DeliveryStatusChoices.DELIVERED)
+                | Q(status=DeliveryStatusChoices.NOT_SENT)
+            )
+            .count()
+        )
+        if delivered_count != 0:
+            logging.info(
+                "Email notification already delivered for user: %s in org: %s for broadcast: %s",
+                user_id,
+                org_id,
+                broadcast_id,
+            )
             return
 
+        provider = Provider.objects.prefetch_related("credentials").get(
+            organization_id=org_id, provider_type=ProviderTypeChoices.EMAIL
+        )
 
-@app.task(bind=True, ignore_result=True, queue="outbound")
+        match provider.provider:
+            case ProviderChoices.SENDGRID:
+                return handle_sendgrid(
+                    broadcast_id, data, notification_id, provider, user_id, email
+                )
+            case _:
+                logging.error("Invalid Email Provider")
+                return
+    except HTTPError as e:
+        try:
+            countdown = get_exponential_backoff_interval(
+                factor=settings.CELERY_RETRY_BACKOFF,
+                retries=self.request.retries,
+                maximum=settings.CELERY_BACKOFF_MAX,
+                full_jitter=settings.CELERY_RETRY_JITTER,
+            )
+            self.retry(countdown=countdown)
+        except MaxRetriesExceededError:
+            logging.error(
+                "Max retries reached trying to send Sendgrid email for user: %s in broadcast: %s",
+                user_id,
+                broadcast_id,
+            )
+            persist_notification_delivery(
+                notification_id,
+                channel=ChannelChoices.EMAIL,
+                status=DeliveryStatusChoices.UNDELIVERED,
+            )
+
+
+@app.task(bind=True, ignore_result=True, queue="outbound", max_retries=5)
 def send_in_app(self, broadcast_id, org_id, user_id, notification_id, data):
-    delivered_count = (
-        NotificationDelivery.objects.filter(
-            notification_id=notification_id,
-            channel=ChannelChoices.IN_APP.value,
+    try:
+        delivered_count = (
+            NotificationDelivery.objects.filter(
+                notification_id=notification_id,
+                channel=ChannelChoices.IN_APP.value,
+            )
+            .filter(
+                Q(status=DeliveryStatusChoices.DELIVERED)
+                | Q(status=DeliveryStatusChoices.NOT_SENT)
+            )
+            .count()
         )
-        .filter(Q(status="sent") | Q(status="not_sent"))
-        .count()
-    )
-    if delivered_count != 0:
-        logging.info(
-            "In app notification already delivered for user: %s in org: %s for broadcast: %s",
-            user_id,
-            org_id,
-            broadcast_id,
-        )
-        return
+        if delivered_count != 0:
+            logging.info(
+                "In app notification already delivered for user: %s in org: %s for broadcast: %s",
+                user_id,
+                org_id,
+                broadcast_id,
+            )
+            return
 
-    title = data["title"]
-    content = data["content"]
-    action_link = data.get("action_link")
+        title = data["title"]
+        content = data["content"]
+        action_link = data.get("action_link")
 
-    channel_layer = get_channel_layer()
-    async_to_sync(channel_layer.group_send)(
-        f"user_{user_id}",
-        {
-            "object": "event",
-            "type": "notification.created",
-            "data": {
-                "id": str(notification_id),
-                "category": data.get("category", ""),
-                "topic": data.get("topic", ""),
-                "title": title,
-                "content": content,
-                "action_link": action_link,
-                "additional_info": data.get("additional_info", {}),
+        channel_layer = get_channel_layer()
+        async_to_sync(channel_layer.group_send)(
+            f"user_{user_id}",
+            {
+                "object": "event",
+                "type": "notification.created",
+                "data": {
+                    "id": str(notification_id),
+                    "category": data.get("category", ""),
+                    "topic": data.get("topic", ""),
+                    "title": title,
+                    "content": content,
+                    "action_link": action_link,
+                    "additional_info": data.get("additional_info", {}),
+                },
             },
-        },
-    )
+        )
 
-    persist_notification_delivery(
-        notification_id,
-        title,
-        content,
-        action_link,
-        channel=ChannelChoices.IN_APP,
-        status="sent",
-    )
+        persist_notification_delivery(
+            notification_id,
+            title,
+            content,
+            action_link,
+            channel=ChannelChoices.IN_APP,
+            status=DeliveryStatusChoices.DELIVERED,
+        )
 
-    return
+        return
+    except Exception as e:
+        try:
+            countdown = get_exponential_backoff_interval(
+                factor=settings.CELERY_RETRY_BACKOFF,
+                retries=self.request.retries,
+                maximum=settings.CELERY_BACKOFF_MAX,
+                full_jitter=settings.CELERY_RETRY_JITTER,
+            )
+            self.retry(countdown=countdown)
+        except MaxRetriesExceededError:
+            logging.error(
+                "Max retries reached trying to send in app notification for user: %s in broadcast: %s",
+                user_id,
+                broadcast_id,
+            )
+            persist_notification_delivery(
+                notification_id,
+                channel=ChannelChoices.IN_APP,
+                status=DeliveryStatusChoices.UNDELIVERED,
+            )
 
 
-@app.task(bind=True, ignore_result=True, queue="outbound")
+@app.task(bind=True, ignore_result=True, queue="outbound", max_retries=5)
 def send_push(
     self,
     device_id,
@@ -376,7 +465,11 @@ def send_push(
             channel=ChannelChoices.PUSH.value,
         )
         .filter(
-            Q(status="sent", metadata__platform=device.platform) | Q(status="not_sent")
+            Q(
+                status=DeliveryStatusChoices.DELIVERED,
+                metadata__platform=device.platform,
+            )
+            | Q(status=DeliveryStatusChoices.NOT_SENT)
         )
         .count()
     )
@@ -407,23 +500,67 @@ def send_push(
 
     match device.platform:
         case PlatformChoices.IOS:
-            return handle_apns(
-                provider,
-                broadcast_id,
-                data,
-                device,
-                notification_id,
-                user_id,
-            )
+            try:
+                return handle_apns(
+                    provider,
+                    broadcast_id,
+                    data,
+                    device,
+                    notification_id,
+                    user_id,
+                )
+            except APNSException as e:
+                try:
+                    countdown = get_exponential_backoff_interval(
+                        factor=settings.CELERY_RETRY_BACKOFF,
+                        retries=self.request.retries,
+                        maximum=settings.CELERY_BACKOFF_MAX,
+                        full_jitter=settings.CELERY_RETRY_JITTER,
+                    )
+                    self.retry(countdown=countdown)
+                except MaxRetriesExceededError:
+                    logging.error(
+                        "Max retries reached trying to send APNS notification for user: %s in broadcast: %s",
+                        user_id,
+                        broadcast_id,
+                    )
+                    persist_notification_delivery(
+                        notification_id,
+                        channel=ChannelChoices.PUSH,
+                        metadata__platform=PlatformChoices.IOS,
+                        status=DeliveryStatusChoices.UNDELIVERED,
+                    )
         case PlatformChoices.ANDROID:
-            return handle_fcm(
-                provider,
-                broadcast_id,
-                data,
-                device,
-                notification_id,
-                user_id,
-            )
+            try:
+                return handle_fcm(
+                    provider,
+                    broadcast_id,
+                    data,
+                    device,
+                    notification_id,
+                    user_id,
+                )
+            except FCMError as e:
+                try:
+                    countdown = get_exponential_backoff_interval(
+                        factor=settings.CELERY_RETRY_BACKOFF,
+                        retries=self.request.retries,
+                        maximum=settings.CELERY_BACKOFF_MAX,
+                        full_jitter=settings.CELERY_RETRY_JITTER,
+                    )
+                    self.retry(countdown=countdown)
+                except MaxRetriesExceededError:
+                    logging.error(
+                        "Max retries reached trying to send FCM notification for user: %s in broadcast: %s",
+                        user_id,
+                        broadcast_id,
+                    )
+                    persist_notification_delivery(
+                        notification_id,
+                        channel=ChannelChoices.PUSH,
+                        metadata__platform=PlatformChoices.ANDROID,
+                        status=DeliveryStatusChoices.UNDELIVERED,
+                    )
         case _:
             logging.info(
                 "Platform: %s not recognized for device: %s", device.platform, device_id
@@ -440,10 +577,10 @@ def send_broadcast_callback(self, broadcast_id, status):
 
 
 @app.task(bind=True, ignore_result=True, queue="notifications")
-def send_recipient_callback(self, broadcast_id, recipient_id):
-    BroadcastRecipient.objects.get_or_create(
-        broadcast_id=broadcast_id, recipient_id=recipient_id
-    )
+def send_recipient_callback(self, notification_id, status):
+    notification = Notification.objects.get(pk=notification_id)
+    notification.status = status
+    notification.save()
     return
 
 
@@ -499,7 +636,7 @@ def handle_apns(apns, broadcast_id, data, device, notification_id, user_id):
             data.get("action_link"),
             channel=ChannelChoices.PUSH,
             platform=PlatformChoices.IOS.value,
-            status="sent",
+            status=DeliveryStatusChoices.DELIVERED,
         )
 
     except APNSException as error:
@@ -516,7 +653,7 @@ def handle_apns(apns, broadcast_id, data, device, notification_id, user_id):
             body,
             data.get("action_link"),
             channel=ChannelChoices.PUSH,
-            status="failed",
+            status=DeliveryStatusChoices.ATTEMPTED,
             reason=f"APNS error with status code: {error.status_code} ",
             metadata={
                 "platform": PlatformChoices.IOS.value,
@@ -566,7 +703,7 @@ def handle_fcm(fcm, broadcast_id, data, device, notification_id, user_id):
             ),
             channel=ChannelChoices.PUSH,
             platform=PlatformChoices.ANDROID.value,
-            status="sent",
+            status=DeliveryStatusChoices.DELIVERED,
             sent_at=datetime.now(timezone.utc),
         )
 
@@ -584,7 +721,7 @@ def handle_fcm(fcm, broadcast_id, data, device, notification_id, user_id):
             data.get("action_link"),
             channel=ChannelChoices.PUSH,
             platform=PlatformChoices.ANDROID.value,
-            status="failed",
+            status=DeliveryStatusChoices.ATTEMPTED,
             error_reason=e,
         )
 
@@ -623,7 +760,7 @@ def handle_twilio(broadcast_id, data, notification_id, provider, user_id, phone)
             content,
             data.get("action_link"),
             channel=ChannelChoices.SMS,
-            status="failed",
+            status=DeliveryStatusChoices.ATTEMPTED,
             error_reason=f"{error.msg} (code: {error.code})",
         )
         raise
@@ -634,11 +771,11 @@ def handle_twilio(broadcast_id, data, notification_id, provider, user_id, phone)
         message.status,
     )
     if message.status in {"failed", "undelivered", "canceled"}:
-        status = "failed"
-        reason = f"{message.status}: {message.error_message}"
+        status = DeliveryStatusChoices.ATTEMPTED
+        error_reason = f"{message.status}: {message.error_message}"
     else:
-        status = "sent"
-        reason = None
+        status = DeliveryStatusChoices.DELIVERED
+        error_reason = None
     # todo handle persisting overriden body
     persist_notification_delivery(
         notification_id,
@@ -647,11 +784,11 @@ def handle_twilio(broadcast_id, data, notification_id, provider, user_id, phone)
         data.get("action_link"),
         channel=ChannelChoices.SMS,
         status=status,
-        error_reason=reason,
+        error_reason=error_reason,
         metadata={"twilio_message_sid": message.sid},
     )
 
-    if status == "failed":
+    if status != DeliveryStatusChoices.DELIVERED:
         logging.error("Failed to deliver SMS to Twilio")
         raise NotificationException(
             "Failed to deliver SMS to Twilio", "twilio_sms_failed"
@@ -704,7 +841,7 @@ def handle_sendgrid(broadcast_id, data, notification_id, provider, user_id, emai
             None if template_id else content,
             data.get("action_link"),
             channel=ChannelChoices.EMAIL,
-            status="failed",
+            status=DeliveryStatusChoices.ATTEMPTED,
             reason=error.reason,
         )
         raise
@@ -722,7 +859,7 @@ def handle_sendgrid(broadcast_id, data, notification_id, provider, user_id, emai
         None if template_id else content,
         data.get("action_link"),
         channel=ChannelChoices.EMAIL,
-        status="sent",
+        status=DeliveryStatusChoices.DELIVERED,
         metadata={
             "sg_x_message_id": response.headers["X-Message-ID"],
             "sg_template_id": template_id,
@@ -732,20 +869,12 @@ def handle_sendgrid(broadcast_id, data, notification_id, provider, user_id, emai
 
 
 def persist_notification(org_id, broadcast_id, recipient_id, **kwargs):
-    notification, created = Notification.objects.get_or_create(
+    return Notification.objects.get_or_create(
         organization_id=org_id,
         broadcast_id=broadcast_id,
         recipient_id=recipient_id,
         defaults={**kwargs},
     )
-
-    if created:
-        logging.info(
-            "Notification record with id: %s persisted",
-            notification.id,
-        )
-
-    return notification
 
 
 def persist_notification_delivery(
@@ -764,10 +893,14 @@ def persist_notification_delivery(
 
     notification_channel, created = NotificationDelivery.objects.update_or_create(
         **filter_kwargs,
-        defaults={
+        create_defaults={
             "title": title,
             "content": content,
             "action_link": action_link,
+            "sent_at": datetime.now(timezone.utc),
+            **kwargs,
+        },
+        defaults={
             "sent_at": datetime.now(timezone.utc),
             **kwargs,
         },
@@ -777,6 +910,7 @@ def persist_notification_delivery(
         logging.info(
             "Notification channel record with id: %s persisted for notification: %s",
             notification_channel.id,
+            notification_id,
         )
 
     return notification_channel
@@ -869,7 +1003,7 @@ def route_notification_with_preference(
                 data["content"],
                 data.get("action_link"),
                 channel=ChannelChoices.IN_APP,
-                status="not_sent",
+                status=DeliveryStatusChoices.NOT_SENT,
                 error_reason="User disabled",
             )
 
@@ -896,7 +1030,7 @@ def route_notification_with_preference(
             persist_notification_delivery(
                 notification_id,
                 channel=ChannelChoices.SMS,
-                status="not_sent",
+                status=DeliveryStatusChoices.NOT_SENT,
                 error_reason="No phone provided for user",
             )
         else:
@@ -910,7 +1044,7 @@ def route_notification_with_preference(
             persist_notification_delivery(
                 notification_id,
                 channel=ChannelChoices.SMS,
-                status="not_sent",
+                status=DeliveryStatusChoices.NOT_SENT,
                 error_reason="User disabled",
             )
 
@@ -938,7 +1072,7 @@ def route_notification_with_preference(
             persist_notification_delivery(
                 notification_id,
                 channel=ChannelChoices.EMAIL,
-                status="not_sent",
+                status=DeliveryStatusChoices.NOT_SENT,
                 error_reason="User disabled",
             )
 
@@ -968,11 +1102,13 @@ def route_notification_with_preference(
             persist_notification_delivery(
                 notification_id,
                 channel=ChannelChoices.PUSH,
-                status="not_sent",
+                status=DeliveryStatusChoices.NOT_SENT,
                 error_reason="User disabled",
             )
 
-    chord(tasks)(send_recipient_callback.si(broadcast_id, recipient.id))
+    chord(tasks)(
+        send_recipient_callback.si(notification_id, NotificationStatusChoices.PROCESSED)
+    )
 
     return
 
@@ -1012,7 +1148,7 @@ def route_basic_notification(broadcast_id, org_id, notification_id, recipient, d
         persist_notification_delivery(
             notification_id,
             channel=ChannelChoices.SMS,
-            status="not_sent",
+            status=DeliveryStatusChoices.NOT_SENT,
             error_reason="No phone provided for user",
         )
     if ChannelChoices.EMAIL.value in data["channels"]:
@@ -1040,7 +1176,9 @@ def route_basic_notification(broadcast_id, org_id, notification_id, recipient, d
                 ).set(kwargsrepr=repr({"data": redacted_data}))
             )
 
-    chord(tasks)(send_recipient_callback.si(broadcast_id, recipient.id))
+    chord(tasks)(
+        send_recipient_callback.si(notification_id, NotificationStatusChoices.PROCESSED)
+    )
 
     return
 

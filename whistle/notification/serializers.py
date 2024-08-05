@@ -86,12 +86,11 @@ class BroadcastProvidersSerializer(serializers.Serializer):
     fcm = FCMProviderSerializer(required=False)
 
 
-class BroadcastRecipientSerializer(serializers.ModelSerializer):
+class BroadcastRecipientSerializer(serializers.Serializer):
     external_id = serializers.CharField(required=False)
     email = serializers.CharField(required=False)
 
     class Meta:
-        model = ExternalUser
         fields = [
             "external_id",
             "first_name",
@@ -115,7 +114,7 @@ class BroadcastSerializer(serializers.ModelSerializer):
     content = serializers.CharField()
     action_link = serializers.CharField(required=False)
     audience_id = serializers.UUIDField(required=False)
-    recipients = BroadcastRecipientSerializer(many=True)
+    recipients = BroadcastRecipientSerializer(write_only=True, many=True)
     channels = serializers.ListSerializer(
         child=serializers.CharField(), write_only=True
     )
@@ -231,7 +230,6 @@ class BroadcastSerializer(serializers.ModelSerializer):
         validated_data["organization"] = org
 
         for field in [
-            "recipients",
             "channels",
             "filters",
             "audience_id",
@@ -247,4 +245,4 @@ class BroadcastSerializer(serializers.ModelSerializer):
 
 
 class NotificationStatusSerializer(serializers.Serializer):
-    status = serializers.CharField(read_only=True)
+    pass

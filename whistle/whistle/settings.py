@@ -150,12 +150,13 @@ ASGI_APPLICATION = "whistle.asgi.application"
 
 DATABASES = {
     "default": {
-        "ENGINE": os.environ.get("SQL_ENGINE", "django.db.backends.sqlite3"),
-        "NAME": os.environ.get("SQL_DATABASE", os.path.join(BASE_DIR, "db.sqlite3")),
+        "ENGINE": os.environ.get("SQL_ENGINE", "django.db.backends.postgresql"),
+        "NAME": os.environ.get("SQL_DATABASE", "whistle_db"),
         "USER": os.environ.get("SQL_USER", "postgres"),
         "PASSWORD": os.environ.get("SQL_PASSWORD", "postgres"),
         "HOST": os.environ.get("SQL_HOST", "127.0.0.1"),
         "PORT": os.environ.get("SQL_PORT", "5432"),
+        "CONN_MAX_AGE": os.environ.get("SQL_CONN_MAX_AGE", 300),
         "OPTIONS": {"sslmode": os.environ.get("SQL_SSL_MODE", "disable")},
     }
 }
@@ -190,6 +191,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_ACKS_LATE = True
+CELERY_REJECT_ON_WORKER_LOST = True
 CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://127.0.0.1:6379/0")
 CELERY_RESULT_BACKEND = os.environ.get(
     "CELERY_RESULT_BACKEND", "redis://127.0.0.1:6379/0"
@@ -202,6 +204,9 @@ CELERY_TASK_QUEUES = (
     Queue("outbound", Exchange("outbound"), "outbound"),
     Queue("dead_letter", Exchange("dead_letter"), "dead_letter"),
 )
+CELERY_RETRY_BACKOFF = os.getenv("CELERY_RETRY_BACKOFF", 30)
+CELERY_BACKOFF_MAX = os.getenv("CELERY_BACKOFF_MAX", 180)
+CELERY_RETRY_JITTER = bool(os.getenv("CELERY_RETRY_JITTER", 1))
 
 CELERYBEAT_SCHEDULER = "redbeat.RedBeatScheduler"
 CELERY_BEAT_MAX_LOOP_INTERVAL = 5

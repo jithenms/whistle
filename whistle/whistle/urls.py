@@ -22,7 +22,11 @@ from rest_framework.routers import DefaultRouter
 from audience.views import AudienceViewSet
 from provider.views import TwilioViewSet, SendgridViewSet, APNSViewSet, FCMViewSet
 from external_user.views import ExternalUserViewSet, DeviceViewSet
-from notification.views import NotificationViewSet, BroadcastViewSet
+from notification.views import (
+    NotificationViewSet,
+    BroadcastViewSet,
+    InboxViewSet,
+)
 from organization.views import OrganizationViewSet, OrganizationCredentialsViewSet
 from preference.views import PreferenceViewSet
 from subscription.views import SubscriptionViewSet
@@ -42,6 +46,7 @@ v1_router.register(r"devices", DeviceViewSet, basename="devices")
 v1_router.register(r"preferences", PreferenceViewSet, basename="preferences")
 v1_router.register(r"subscriptions", SubscriptionViewSet, basename="subscriptions")
 v1_router.register(r"broadcasts", BroadcastViewSet, basename="broadcasts")
+v1_router.register(r"inbox", InboxViewSet, basename="inbox")
 v1_router.register(r"notifications", NotificationViewSet, basename="notifications")
 v1_router.register(
     r"providers/sendgrid", SendgridViewSet, basename="providers.sendgrid"

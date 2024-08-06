@@ -1,7 +1,6 @@
 from rest_framework import serializers
 
 from audience.models import Audience
-from external_user.models import ExternalUser
 from external_user.serializers import ExternalUserSerializer
 from notification.models import (
     Notification,
@@ -37,25 +36,6 @@ class NotificationDeliverySerializer(serializers.ModelSerializer):
         )
 
 
-class NotificationSerializer(serializers.ModelSerializer):
-    deliveries = NotificationDeliverySerializer(read_only=True, many=True)
-    recipient = ExternalUserSerializer(read_only=True)
-
-    class Meta:
-        model = Notification
-        fields = [
-            "id",
-            "broadcast_id",
-            "recipient",
-            "deliveries",
-            "seen_at",
-            "read_at",
-            "clicked_at",
-            "archived_at",
-        ]
-        read_only_fields = ("broadcast", "recipient", "deliveries")
-
-
 class APNSProviderSerializer(serializers.Serializer):
     title = serializers.CharField(required=False)
     subtitle = serializers.CharField(required=False)
@@ -86,12 +66,11 @@ class BroadcastProvidersSerializer(serializers.Serializer):
     fcm = FCMProviderSerializer(required=False)
 
 
-class BroadcastRecipientSerializer(serializers.ModelSerializer):
+class BroadcastRecipientSerializer(serializers.Serializer):
     external_id = serializers.CharField(required=False)
     email = serializers.CharField(required=False)
 
     class Meta:
-        model = ExternalUser
         fields = [
             "external_id",
             "first_name",
@@ -115,7 +94,7 @@ class BroadcastSerializer(serializers.ModelSerializer):
     content = serializers.CharField()
     action_link = serializers.CharField(required=False)
     audience_id = serializers.UUIDField(required=False)
-    recipients = BroadcastRecipientSerializer(many=True)
+    recipients = BroadcastRecipientSerializer(write_only=True, many=True)
     channels = serializers.ListSerializer(
         child=serializers.CharField(), write_only=True
     )
@@ -231,7 +210,6 @@ class BroadcastSerializer(serializers.ModelSerializer):
         validated_data["organization"] = org
 
         for field in [
-            "recipients",
             "channels",
             "filters",
             "audience_id",
@@ -246,5 +224,41 @@ class BroadcastSerializer(serializers.ModelSerializer):
         return instance
 
 
+class NotificationSerializer(serializers.ModelSerializer):
+    deliveries = NotificationDeliverySerializer(read_only=True, many=True)
+    broadcast = BroadcastSerializer(read_only=True)
+    recipient = ExternalUserSerializer(read_only=True)
+
+    class Meta:
+        model = Notification
+        fields = [
+            "id",
+            "status",
+            "broadcast",
+            "recipient",
+            "deliveries",
+            "seen_at",
+            "read_at",
+            "clicked_at",
+            "archived_at",
+        ]
+        read_only_fields = ("broadcast", "recipient", "deliveries")
+
+
+class InboxSerializer(serializers.ModelSerializer):
+    broadcast = BroadcastSerializer(read_only=True)
+
+    class Meta:
+        model = Notification
+        fields = [
+            "id",
+            "broadcast",
+            "seen_at",
+            "read_at",
+            "clicked_at",
+            "archived_at",
+        ]
+
+
 class NotificationStatusSerializer(serializers.Serializer):
-    status = serializers.CharField(read_only=True)
+    pass

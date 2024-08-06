@@ -3,7 +3,8 @@ import uuid
 from django.db import models
 
 from user.models import User
-from whistle import fields, utils, settings
+from whistle import fields, utils
+from whistle.fields import EncryptedFieldTypeChoices
 
 
 class Organization(models.Model):
@@ -18,10 +19,10 @@ class OrganizationCredentials(models.Model):
         Organization, on_delete=models.CASCADE, primary_key=True
     )
 
-    api_key = fields.EncryptedField(key_id=settings.KMS_PERSONAL_DATA_KEY_ARN)
+    api_key = fields.EncryptedField(EncryptedFieldTypeChoices.API_CREDENTIALS)
     api_key_hash = models.CharField(unique=True)
 
-    api_secret = fields.EncryptedField(key_id=settings.KMS_PERSONAL_DATA_KEY_ARN)
+    api_secret = fields.EncryptedField(EncryptedFieldTypeChoices.API_CREDENTIALS)
     api_secret_hash = models.CharField(unique=True)
 
     api_secret_salt = models.CharField(unique=True)

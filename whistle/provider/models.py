@@ -3,7 +3,8 @@ import uuid
 from django.db import models
 
 from organization.models import Organization
-from whistle import fields, settings
+from whistle import fields
+from whistle.fields import EncryptedFieldTypeChoices
 
 
 class ProviderTypeChoices(models.TextChoices):
@@ -41,7 +42,7 @@ class ProviderCredential(models.Model):
         Provider, on_delete=models.CASCADE, related_name="credentials"
     )
     slug = models.SlugField()
-    value = fields.EncryptedField(key_id=settings.KMS_PERSONAL_DATA_KEY_ARN)
+    value = fields.EncryptedField(EncryptedFieldTypeChoices.API_CREDENTIALS)
 
     class Meta:
         unique_together = [

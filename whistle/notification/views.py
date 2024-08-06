@@ -43,6 +43,12 @@ class InboxViewSet(ReadOnlyModelViewSet):
     permission_classes = [IsValidExternalId]
     pagination_class = StandardLimitOffsetPagination
 
+    def get_serializer_class(self):
+        extra_actions = [action.__name__ for action in self.get_extra_actions()]
+        if self.action in extra_actions:
+            return NotificationStatusSerializer
+        return super().get_serializer_class()
+
     def get_queryset(self):
         external_id = self.request.headers.get("X-External-Id")
         org = self.request.user

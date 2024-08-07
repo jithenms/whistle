@@ -6,7 +6,7 @@ on:
 
 jobs:
   deploy:
-    uses: ./.github/workflows/base/deploy-to-ecs.yaml
+    uses: ./.github/actions/deploy-to-ecs.yaml
     with:
       service: websockets
       version: ${{ github.event.release.tag_name }}

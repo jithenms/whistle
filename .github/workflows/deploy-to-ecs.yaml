@@ -1,0 +1,45 @@
+name: Deploy to ECS
+
+on:
+  workflow_call:
+    inputs:
+      service:
+        required: true
+        type: string
+      version:
+        required: true
+        type: string
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.WHISTLE_IAM_ROLE }}
+          aws-region: ${{ vars.WHISTLE_AWS_REGION }}
+          
+      - name: Fill in the Image in the Amazon ECS task definition
+        env:
+          REGISTRY: ${{ vars.WHISTLE_ECR_REGISTRY }}
+          REPOSITORY: ${{ vars.WHISTLE_ECR_REPOSITORY }}
+          IMAGE_TAG: ${{ inputs.version }}
+        id: task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: ${{ inputs.service }}-task-definition
+          container-name: ${{ inputs.service }}
+          image: $REGISTRY/$REPOSITORY:$IMAGE_TAG
+
+      - name: Deploy Amazon ECS task definition
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition: ${{ steps.task-def.outputs.task-definition }}
+          service: ${{ inputs.service }}
+          cluster: ${{ vars.WHISTLE_ECS_CLUSTER }}
+          wait-for-service-stability: true

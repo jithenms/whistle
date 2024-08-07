@@ -6,7 +6,7 @@ on:
 
 jobs:
   deploy:
-    uses: ./github/actions/deploy-to-ecs.yaml
+    uses: ./.github/workflows/deploy-to-ecs.yaml
     with:
       service: api
       version: ${{ github.event.release.tag_name }}

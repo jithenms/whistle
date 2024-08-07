@@ -6,7 +6,13 @@ on:
 
 jobs:
   deploy:
-    uses: ./.github/actions/deploy-to-ecs.yaml
-    with:
-      service: worker
-      version: ${{ github.event.release.tag_name }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to ECS
+        uses: ./github/actions/deploy-to-ecs.yaml
+        with:
+          service: worker
+          version: ${{ github.event.release.tag_name }}

@@ -1,4 +1,4 @@
-name: Deploy to ECS Base
+name: Deploy to ECS
 
 on:
   deploy_to_ecs:

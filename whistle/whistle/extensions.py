@@ -57,31 +57,31 @@ class CustomOpenApiSettings(AutoSchema):
 
 class ClientAuthScheme(OpenApiAuthenticationExtension):
     target_class = ClientAuth
-    name = ["bearerAuth", "apiKey"]
+    name = ["apiKey", "bearerAuth"]
 
     def get_security_definition(self, auto_schema):
         return [
-            {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"},
             {"type": "apiKey", "in": "header", "name": "X-API-Key"},
+            {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"},
         ]
 
     def get_security_requirement(self, auto_schema):
-        return [{"bearerAuth": []}, {"apiKey": []}]
+        return [{"apiKey": []}, {"bearerAuth": []}]
 
 
 class ServerAuthScheme(OpenApiAuthenticationExtension):
     target_class = ServerAuth
-    name = ["bearerAuth", "apiKey", "apiSecret"]
+    name = ["apiKey", "apiSecret", "bearerAuth"]
 
     def get_security_definition(self, auto_schema):
         return [
-            {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"},
             {"type": "apiKey", "in": "header", "name": "X-API-Key"},
             {"type": "apiKey", "in": "header", "name": "X-API-Secret"},
+            {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"},
         ]
 
     def get_security_requirement(self, auto_schema):
-        return [{"bearerAuth": []}, {"apiKey": [], "apiSecret": []}]
+        return [{"apiKey": [], "apiSecret": []}, {"bearerAuth": []}]
 
 
 def preprocess_endpoints(endpoints):

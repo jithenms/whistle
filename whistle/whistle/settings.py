@@ -89,6 +89,8 @@ REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "whistle.extensions.CustomOpenApiSettings",
 }
 
+API_SERVER_URL = os.getenv("API_SERVER_URL", "https://api.getwhistle.io")
+
 SPECTACULAR_SETTINGS = {
     "TITLE": "Whistle API",
     "DESCRIPTION": "REST API for the Whistle notification platform",
@@ -96,6 +98,9 @@ SPECTACULAR_SETTINGS = {
     "SERVE_INCLUDE_SCHEMA": False,
     "COMPONENT_SPLIT_REQUEST": True,
     "PREPROCESSING_HOOKS": ["whistle.extensions.preprocess_endpoints"],
+    "SERVERS": [
+        {"url": API_SERVER_URL, "description": "Production server"},
+    ],
 }
 
 ROOT_URLCONF = "whistle.urls"

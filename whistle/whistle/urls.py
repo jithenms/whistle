@@ -21,7 +21,11 @@ from rest_framework.routers import DefaultRouter
 
 from audience.views import AudienceViewSet
 from provider.views import TwilioViewSet, SendgridViewSet, APNSViewSet, FCMViewSet
-from external_user.views import ExternalUserViewSet, DeviceViewSet
+from external_user.views import (
+    ExternalUserViewSet,
+    DeviceViewSet,
+    ExternalUserImportViewSet,
+)
 from notification.views import (
     NotificationViewSet,
     BroadcastViewSet,
@@ -41,6 +45,9 @@ v1_router.register(
     basename="organizations.credentials",
 )
 v1_router.register(r"organizations", OrganizationViewSet, basename="organizations")
+v1_router.register(
+    r"users/import", ExternalUserImportViewSet, basename="external_users.import"
+)
 v1_router.register(r"users", ExternalUserViewSet, basename="external_users")
 v1_router.register(r"devices", DeviceViewSet, basename="devices")
 v1_router.register(r"preferences", PreferenceViewSet, basename="preferences")

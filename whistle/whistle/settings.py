@@ -83,6 +83,10 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
+APPEND_SLASH = False
+
+SECURE_PROXY_SSL_HEADER = ("X-Forwarded-For", "https")
+
 REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": ("rest_framework.renderers.JSONRenderer",),
     "EXCEPTION_HANDLER": "whistle.exceptions.custom_exception_handler",

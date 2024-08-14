@@ -15,13 +15,16 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 
-from django.contrib import admin
 from django.urls import path, include
-from rest_framework.routers import DefaultRouter
+from rest_framework.routers import SimpleRouter
 
 from audience.views import AudienceViewSet
 from provider.views import TwilioViewSet, SendgridViewSet, APNSViewSet, FCMViewSet
-from external_user.views import ExternalUserViewSet, DeviceViewSet
+from external_user.views import (
+    ExternalUserViewSet,
+    DeviceViewSet,
+    ExternalUserImportViewSet,
+)
 from notification.views import (
     NotificationViewSet,
     BroadcastViewSet,
@@ -34,13 +37,16 @@ from subscription.views import SubscriptionViewSet
 # DO NOT REMOVE used for openapi spec generation
 import whistle.extensions
 
-v1_router = DefaultRouter()
+v1_router = SimpleRouter(trailing_slash=False)
 v1_router.register(
     r"organizations/credentials",
     OrganizationCredentialsViewSet,
     basename="organizations.credentials",
 )
 v1_router.register(r"organizations", OrganizationViewSet, basename="organizations")
+v1_router.register(
+    r"users/import", ExternalUserImportViewSet, basename="external_users.import"
+)
 v1_router.register(r"users", ExternalUserViewSet, basename="external_users")
 v1_router.register(r"devices", DeviceViewSet, basename="devices")
 v1_router.register(r"preferences", PreferenceViewSet, basename="preferences")
@@ -57,7 +63,6 @@ v1_router.register(r"providers/fcm", FCMViewSet, basename="providers.fcm")
 v1_router.register(r"audiences", AudienceViewSet, basename="audiences")
 
 urlpatterns = [
-    path("admin/", admin.site.urls),
-    path(r"health/", include("health_check.urls")),
-    path("v1/", include(v1_router.urls)),
+    path(r"health", include("health_check.urls")),
+    path(r"api/v1/", include(v1_router.urls)),
 ]

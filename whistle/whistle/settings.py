@@ -83,6 +83,10 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
+APPEND_SLASH = False
+
+SECURE_PROXY_SSL_HEADER = ("X-Forwarded-Proto", "https")
+
 REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": ("rest_framework.renderers.JSONRenderer",),
     "EXCEPTION_HANDLER": "whistle.exceptions.custom_exception_handler",
@@ -226,3 +230,5 @@ KMS_CACHE_CAPACITY = os.getenv("KMS_CACHE_CAPACITY", 100)
 KMS_CACHE_EXPIRY = os.getenv("KMS_CACHE_EXPIRY", 1800.0)
 
 USE_SENDGRID_SANDBOX = bool(os.getenv("USE_SENDGRID_SANDBOX", 0))
+
+MAX_BROADCAST_RECIPIENTS = os.getenv("MAX_BROADCAST_RECIPIENTS", 2500)

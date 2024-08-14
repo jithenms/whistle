@@ -8,6 +8,7 @@ from rest_framework.exceptions import (
     AuthenticationFailed,
     PermissionDenied,
     MethodNotAllowed,
+    ParseError,
 )
 from rest_framework.utils.serializer_helpers import ReturnDict
 from rest_framework.views import exception_handler
@@ -80,6 +81,11 @@ def custom_exception_handler(exc, context):
             response.data["type"] = "not_allowed"
             response.data["detail"] = "Method not allowed"
             response.status_code = status.HTTP_403_FORBIDDEN
+            return response
+        elif isinstance(exc, ParseError):
+            response.data["type"] = "validation_error"
+            response.data["code"] = "invalid_payload"
+            response.data["detail"] = "Malformed request data"
             return response
 
     if isinstance(exc, IntegrityError):

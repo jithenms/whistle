@@ -1,3 +1,4 @@
+from django.conf import settings
 from rest_framework import serializers
 
 from audience.models import Audience
@@ -140,6 +141,15 @@ class BroadcastSerializer(serializers.ModelSerializer):
         return values
 
     def validate(self, data):
+        if len(data.get("recipients", [])) > settings.MAX_BROADCAST_RECIPIENTS:
+            raise serializers.ValidationError(
+                {
+                    "recipients": f"Too many recipients. You can add up to {settings.MAX_BROADCAST_RECIPIENTS}"
+                    f" recipients per broadcast."
+                },
+                "max_recipients_exceeded",
+            )
+
         if not data.get("recipients", []) and "audience_id" not in data:
             raise serializers.ValidationError(
                 "'recipients' or 'audience_id' not provided. Please provide either 'recipients' or an 'audience_id'.",

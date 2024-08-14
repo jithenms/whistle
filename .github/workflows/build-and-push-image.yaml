@@ -32,7 +32,7 @@ jobs:
           REPOSITORY: ${{ vars.WHISTLE_ECR_REPOSITORY }}
           IMAGE_TAG: ${{ steps.tag_version.outputs.new_tag }}
         run: |
-          docker build -t $REGISTRY/$REPOSITORY:$IMAGE_TAG .
+          docker build -f whistle/Dockerfile -t $REGISTRY/$REPOSITORY:$IMAGE_TAG .
           docker push $REGISTRY/$REPOSITORY:$IMAGE_TAG
           docker push $REGISTRY/$REPOSITORY:latest
           
